@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Gandras</title>
+  <desc id="desc">A globe shaped into a G, with a survey reference mark.</desc>
+  <path d="M33.5 11.5A17 17 0 1 0 40 29H26v-6h15" stroke="#dce2e9" stroke-width="2.5" stroke-linecap="square" stroke-linejoin="round"/>
+  <path d="M21 7c-5 7-7 20-1 32M7 23h13M10 13h15M10 33h14" stroke="#a6bba8" stroke-width="1.4"/>
+  <path d="M38 4v10M33 9h10" stroke="#a6bba8" stroke-width="1.8"/>
+</svg>
