@@ -1,8 +1,89 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>The Earth Has Receipts</title></head>
-<body style="background:#0b1424;color:#d7e3f4;font-family:system-ui;padding:2rem">
-<h1>THE EARTH HAS RECEIPTS</h1>
-<p>Verify claims about our planet using autonomous AI and satellite evidence.</p>
-<pre id="h">Checking backend…</pre>
-<script>fetch('/health').then(r=>r.json()).then(j=>document.getElementById('h').textContent=JSON.stringify(j,null,2))</script>
-</body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Earth Has Receipts</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div>
+        <h1>THE EARTH HAS RECEIPTS</h1>
+        <p class="subtitle">Verify claims about our planet using autonomous AI and satellite evidence.</p>
+      </div>
+    </div>
+    <div id="health" class="health-pill" title="Backend status">
+      <span class="dot"></span><span class="health-text">Checking backend…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2 class="panel-title">New investigation</h2>
+        <div class="mode-tabs" role="tablist" aria-label="Investigation mode">
+          <button type="button" class="mode-card active" role="tab" aria-selected="true" data-mode="mining">
+            <span class="mode-name">MineWatch</span>
+            <span class="mode-desc">Mining expansion</span>
+          </button>
+          <button type="button" class="mode-card" role="tab" aria-selected="false" data-mode="forest">
+            <span class="mode-name">ForestCheck</span>
+            <span class="mode-desc">Forest clearing</span>
+          </button>
+        </div>
+
+        <form id="inv-form" novalidate>
+          <label class="field">
+            <span class="label">Demo case</span>
+            <select id="case-select"></select>
+          </label>
+          <div id="case-info" class="case-info" hidden></div>
+
+          <label class="field">
+            <span class="label">Claim</span>
+            <textarea id="claim" rows="4" placeholder="e.g. The mine expanded significantly between 2019 and 2024."></textarea>
+          </label>
+
+          <details id="custom-loc" class="custom-loc">
+            <summary>Custom location</summary>
+            <p class="hint">When opened and filled in, these values are sent instead of the demo case.</p>
+            <div class="grid2">
+              <label class="field"><span class="label">Latitude</span><input id="c-lat" type="number" step="any" min="-84" max="84"></label>
+              <label class="field"><span class="label">Longitude</span><input id="c-lon" type="number" step="any" min="-180" max="180"></label>
+              <label class="field"><span class="label">Width (km)</span><input id="c-width" type="number" step="any" min="0.5" max="50" value="5"></label>
+              <span></span>
+              <label class="field"><span class="label">Before date</span><input id="c-before" type="date"></label>
+              <label class="field"><span class="label">After date</span><input id="c-after" type="date"></label>
+            </div>
+          </details>
+
+          <div id="form-error" class="error-box" hidden></div>
+          <button id="investigate-btn" class="btn-primary" type="submit">Investigate</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Recent investigations</h2>
+          <button id="refresh-recent" class="btn-ghost small" type="button" title="Refresh">↻</button>
+        </div>
+        <ul id="recent-list" class="recent-list"><li class="muted">Loading…</li></ul>
+      </section>
+    </aside>
+
+    <section id="main" class="main">
+      <div id="empty-state" class="empty-state">
+        <div class="empty-globe" aria-hidden="true"></div>
+        <h2>No investigation selected</h2>
+        <p>Pick a mode and a demo case, then press <strong>Investigate</strong>. Or open a recent investigation to replay its evidence.</p>
+      </div>
+      <div id="investigation" hidden></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -10,6 +10,7 @@ import numpy as np
 from app.config import get_settings
 
 PROCESSING_VERSION = "p2-v1"
+STATS = {"hits": 0, "misses": 0}  # process-wide counters (single worker)
 
 
 def key(kind: str, params: dict) -> str:
@@ -31,10 +32,14 @@ def _enabled() -> bool:
 def get_json(k: str) -> dict | None:
     p = _dir() / f"{k}.json"
     if not _enabled() or not p.exists():
+        STATS["misses"] += 1
         return None
     try:
-        return json.loads(p.read_text())
+        d = json.loads(p.read_text())
+        STATS["hits"] += 1
+        return d
     except json.JSONDecodeError:
+        STATS["misses"] += 1
         return None
 
 
@@ -49,13 +54,17 @@ def get_arrays(k: str, expected: list[str], shape: tuple[int, int]) -> dict[str,
     """Return cached arrays only if every expected array is present with the right shape."""
     p = _dir() / f"{k}.npz"
     if not _enabled() or not p.exists():
+        STATS["misses"] += 1
         return None
     try:
         with np.load(p) as z:
             if not all(n in z.files and z[n].shape == shape for n in expected):
+                STATS["misses"] += 1
                 return None
+            STATS["hits"] += 1
             return {n: z[n] for n in z.files}
     except Exception:  # noqa: BLE001 - corrupt cache is treated as a miss
+        STATS["misses"] += 1
         return None
 
 

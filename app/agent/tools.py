@@ -1,0 +1,199 @@
+"""Agent tools. Each executes real pipeline code and returns (summary, details).
+
+Tools raise ToolError for expected investigation problems (e.g. no imagery) and let unexpected
+exceptions propagate so they are reported as execution failures, not scientific conclusions.
+"""
+from __future__ import annotations
+
+import time
+from datetime import date, timedelta
+
+import numpy as np
+
+from app.agent.state import InvestigationState, asset_dir
+from app.analysis import visualize as viz
+from app.analysis.mining import analyze_surface_disturbance
+from app.analysis.vegetation import analyze_vegetation_change
+from app.config import get_settings
+from app.satellite import cache
+from app.satellite.aoi import AOI, AnalysisGrid
+from app.satellite.preprocessing import common_valid, render_rgb, shared_stretch, valid_mask
+from app.satellite.raster_loader import load_scene
+from app.satellite.scene_selector import describe_pair, rank_scenes
+from app.satellite.stac_client import SceneMeta, search_scenes
+
+
+class ToolError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def aoi_of(st: InvestigationState) -> AOI:
+    loc = st.location
+    return AOI(name=loc["name"], lat=loc["latitude"], lon=loc["longitude"], width_m=loc["width_km"] * 1000)
+
+
+def grid_of(st: InvestigationState) -> AnalysisGrid:
+    return aoi_of(st).grid(get_settings().analysis_resolution_m)
+
+
+def _scene(d: dict) -> SceneMeta:
+    return SceneMeta.model_validate(d["scene"])
+
+
+# ---------------------------------------------------------------- imagery search + quality
+
+def find_observation(st: InvestigationState, role: str, center: date, window_days: int) -> tuple[str, dict]:
+    """Search the catalogue around `center` and inspect local SCL quality of the nearest candidates."""
+    s = get_settings()
+    aoi, grid = aoi_of(st), grid_of(st)
+    start, end = center - timedelta(days=window_days), center + timedelta(days=window_days)
+    if start > date.today():
+        raise ToolError("NO_SATELLITE_DATA", f"Requested window {start}..{end} is in the future")
+    end = min(end, date.today())
+    t0 = time.time()
+    scenes = search_scenes(aoi.bbox_wgs84(), start.isoformat(), end.isoformat(), max_cloud=max(s.max_scene_cloud_percent, 60))
+    ranked = rank_scenes(scenes, grid, center, s.max_local_invalid_percent, max_inspect=6)
+    st.search_attempts[role] = st.search_attempts.get(role, 0) + 1
+    inspected = [{"scene_id": r.scene.scene_id, "date": str(r.scene.acquired_at.date()),
+                  "scene_cloud_pct": r.scene.cloud_cover, "local_invalid_pct": r.quality["invalid_pct"],
+                  "local_cloud_pct": r.quality["cloud_pct"], "usable": r.usable} for r in ranked]
+    st.candidates[role] = inspected
+    details = {"role": role, "window": [start.isoformat(), end.isoformat()], "catalogue_hits": len(scenes),
+               "inspected": inspected, "max_local_invalid_pct": s.max_local_invalid_percent,
+               "duration_s": round(time.time() - t0, 1)}
+    best = next((r for r in ranked if r.usable), None)
+    if best is None:
+        worst = ", ".join(f"{i['date']} {i['local_invalid_pct']:.0f}% obscured" for i in inspected[:3]) or "no scenes"
+        details["selected"] = None
+        return (f"No usable {role} observation within {start}..{end}: {len(scenes)} catalogue hits; nearest "
+                f"inspected: {worst}."), details
+    st.selected_scenes[role] = {"scene": best.scene.model_dump(mode="json"), "quality": best.quality,
+                                "days_from_target": best.days_from_target}
+    details["selected"] = best.scene.scene_id
+    rejected = [i for i in inspected if not i["usable"]]
+    rej = ""
+    if rejected:
+        r0 = rejected[0]
+        rej = f" Rejected {len(rejected)} cloudier scene(s), e.g. {r0['date']} ({r0['local_invalid_pct']:.0f}% of AOI obscured despite {r0['scene_cloud_pct'] or 0:.0f}% scene-wide cloud)."
+    return (f"Selected {role} scene {best.scene.scene_id} acquired {best.scene.acquired_at.date()} "
+            f"({best.days_from_target:+d} days from target), {best.quality['invalid_pct']:.1f}% of AOI invalid.{rej}"), details
+
+
+# ---------------------------------------------------------------- change analysis
+
+def _load_pair(st: InvestigationState, before_role="before", after_role="after"):
+    grid = grid_of(st)
+    b, a = _scene(st.selected_scenes[before_role]), _scene(st.selected_scenes[after_role])
+    B, A = load_scene(b, grid), load_scene(a, grid)
+    vb, va = valid_mask(B["SCL"]), valid_mask(A["SCL"])
+    return grid, b, a, B, A, vb, va, common_valid(vb, va)
+
+
+def run_analysis(st: InvestigationState) -> tuple[str, dict]:
+    grid, b, a, B, A, vb, va, both = _load_pair(st)
+    if both.mean() < 0.3:
+        raise ToolError("INSUFFICIENT_CLEAR_IMAGERY", f"Only {both.mean():.0%} of the AOI is clear on both dates")
+    res = (analyze_vegetation_change if st.mode == "forest" else analyze_surface_disturbance)(B, A, both, grid)
+    r = res["result"]
+    pair = describe_pair(b, a)
+    r["pair"] = pair
+    r["common_valid_pct"] = round(100 * float(both.mean()), 2)
+
+    out = asset_dir(st.investigation_id)
+    stretch = shared_stretch([B, A], [both, both])
+    rgb_b, rgb_a = render_rgb(B, stretch, vb, 1.4), render_rgb(A, stretch, va, 1.4)
+    viz._save(rgb_b, out / "before.png")
+    viz._save(rgb_a, out / "after.png")
+    viz.overlay(rgb_a, res["masks"]["change"], r["regions"], out / "overlay.png")
+    viz.mask_rgba(res["masks"]["change"], out / "mask.png")
+    extra = {}
+    if st.mode == "forest":
+        viz.ndvi_png(res["layers"]["ndvi_before"], out / "ndvi_before.png")
+        viz.ndvi_png(res["layers"]["ndvi_after"], out / "ndvi_after.png")
+        viz.delta_png(res["layers"]["delta"], out / "ndvi_delta.png")
+        extra = {"NDVI before": "ndvi_before.png", "NDVI after": "ndvi_after.png", "NDVI change": "ndvi_delta.png"}
+    else:
+        viz.delta_png(res["layers"]["delta_bsi"], out / "bsi_delta.png", span=0.3)
+        mag = res["layers"]["magnitude"]
+        viz._save(viz._ramp(mag, [(0, (10, 10, 30)), (r["thresholds"]["magnitude_threshold_used"], (40, 160, 200)),
+                                 (2 * r["thresholds"]["magnitude_threshold_used"], (255, 240, 120))]), out / "change_magnitude.png")
+        extra = {"Bare-soil index change": "bsi_delta.png", "Spectral change magnitude": "change_magnitude.png"}
+    np.save(out / "change_mask.npy", res["masks"]["change"])
+    r["stretch"] = stretch
+    st.analysis = r
+    st.methodology = {"analysis": r["method"], "thresholds": r["thresholds"], "grid": grid.model_dump(),
+                      "pixel_area_m2": grid.pixel_area_m2, "invalid_scl_classes": "no data, saturated, cloud shadow, "
+                      "cloud (medium/high), thin cirrus, snow/ice; plus 50 m buffer around cloud/shadow",
+                      "calibration": "reflectance = DN*scale + offset from each asset's STAC raster:bands",
+                      "resampling": "WarpedVRT onto common UTM grid; bilinear reflectance, nearest SCL"}
+    st.imagery = {
+        "before": {"date": str(b.acquired_at.date()), "acquired_at": b.acquired_at.isoformat(), "scene_id": b.scene_id,
+                   "url": f"/assets/{st.investigation_id}/before.png"},
+        "after": {"date": str(a.acquired_at.date()), "acquired_at": a.acquired_at.isoformat(), "scene_id": a.scene_id,
+                  "url": f"/assets/{st.investigation_id}/after.png"},
+        "overlay_url": f"/assets/{st.investigation_id}/overlay.png",
+        "mask_url": f"/assets/{st.investigation_id}/mask.png",
+        "extra": {k: f"/assets/{st.investigation_id}/{v}" for k, v in extra.items()},
+    }
+    if st.mode == "forest":
+        summ = (f"Valid comparison area {r['valid_area_ha']:.0f} ha ({r['common_valid_pct']:.0f}% of AOI). "
+                f"Candidate vegetation loss {r['candidate_loss_ha']:.1f} ha in {r['regions_detected']} regions; "
+                f"of this, {r['forest_like_loss_ha']:.1f} ha was forest-like canopy before and "
+                f"{r['probable_clearing_ha']:.1f} ha also shows a bare-soil increase.")
+    else:
+        summ = (f"Valid comparison area {r['valid_area_ha']:.0f} ha ({r['common_valid_pct']:.0f}% of AOI). "
+                f"Candidate surface disturbance {r['candidate_changed_area_ha']:.1f} ha in {r['regions_detected']} regions "
+                f"(threshold {r['thresholds']['magnitude_threshold_used']:.3f} reflectance); "
+                f"{r['brightening_ha']:.1f} ha brightened, {r['darkening_ha']:.1f} ha darkened.")
+    if not pair["seasonally_comparable"]:
+        summ += f" Warning: dates are {pair['seasonal_gap_days']} days apart in season."
+    details = {k: v for k, v in r.items() if k not in ("regions", "stretch")}
+    details["top_regions"] = r["regions"][:5]
+    return summ, details
+
+
+def corroborate(st: InvestigationState, window_days: int = 45) -> tuple[str, dict]:
+    """Retrieve an independent later observation and test whether detected change regions persist."""
+    if not st.analysis or not st.analysis.get("regions"):
+        raise ToolError("ANALYSIS_FAILED", "No change regions to corroborate")
+    a1 = _scene(st.selected_scenes["after"])
+    t = a1.acquired_at.date()
+    center = t + timedelta(days=window_days + 15)
+    if center > date.today() - timedelta(days=10):
+        center = t - timedelta(days=window_days + 15)
+    s = get_settings()
+    aoi, grid = aoi_of(st), grid_of(st)
+    scenes = [x for x in search_scenes(aoi.bbox_wgs84(), (center - timedelta(days=window_days)).isoformat(),
+                                       min(center + timedelta(days=window_days), date.today()).isoformat(), max_cloud=60)
+              if abs((x.acquired_at.date() - t).days) >= 15]
+    ranked = [r for r in rank_scenes(scenes, grid, center, s.max_local_invalid_percent, max_inspect=5) if r.usable]
+    if not ranked:
+        return ("No independent usable observation found to check persistence of the detected change.",
+                {"found": False, "searched_around": center.isoformat()})
+    third = ranked[0].scene
+    st.selected_scenes["corroboration"] = {"scene": third.model_dump(mode="json"), "quality": ranked[0].quality}
+    grid, b, a, B, A, vb, va, both = _load_pair(st, "before", "corroboration")
+    res = (analyze_vegetation_change if st.mode == "forest" else analyze_surface_disturbance)(B, A, both, grid)
+    import cv2
+    orig = np.load(asset_dir(st.investigation_id) / "change_mask.npy")
+    new = cv2.dilate(res["masks"]["change"].astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    comparable = orig & both
+    persist = float((comparable & new).sum()) / max(1, int(comparable.sum()))
+    per_region = []
+    for r in st.analysis["regions"][:8]:
+        x, y, w, h = r["bbox_px"]
+        sel = orig[y:y + h, x:x + w] & both[y:y + h, x:x + w]
+        frac = float((sel & new[y:y + h, x:x + w]).sum()) / max(1, int(sel.sum()))
+        per_region.append({"id": r["id"], "area_ha": r["area_ha"], "persisting_fraction": round(frac, 3)})
+    out = {"found": True, "scene_id": third.scene_id, "acquired_at": third.acquired_at.isoformat(),
+           "persisting_fraction": round(persist, 3), "per_region": per_region,
+           "compared": f"{b.acquired_at.date()} vs {third.acquired_at.date()}"}
+    st.corroboration = out
+    return (f"Independent observation {third.scene_id} ({third.acquired_at.date()}): {persist:.0%} of the originally "
+            f"detected change area is also detected against the before image."), out
+
+
+def cache_hit_rate() -> dict:
+    return dict(cache.STATS)
