@@ -22,12 +22,13 @@ for case in load_demo_cases():
     if wanted and case["id"] not in wanted:
         continue
     t0 = time.time()
-    st = InvestigationState(investigation_id=new_id(), mode=case["mode"], claim=case["default_claim"], case_id=case["id"],
+    st = InvestigationState(investigation_id=new_id(), mode="auto", requested_indicator="auto", claim=case["default_claim"], case_id=case["id"],
                             location={k: case[k] for k in ("name", "latitude", "longitude", "width_km")},
                             temporal_scope={"before_target": case["before_date"], "after_target": case["after_date"]})
     st = Runner(st).run()
     v = st.verdict or {}
-    print(f"{case['id']:28s} {st.status:9s} {v.get('status', '-'):13s} {v.get('confidence', '-'):6s} "
-          f"vlm={(st.visual_analysis or {}).get('status', '-'):11s} cache={st.from_cache} {time.time() - t0:5.0f}s  {st.investigation_id}")
+    flag = "" if st.indicator == case["indicator"] else f"  !! auto-detected {st.indicator}, case expects {case['indicator']}"
+    print(f"{case['id']:28s} {(st.indicator or '-'):20s} {st.status:9s} {v.get('status', '-'):13s} {v.get('confidence', '-'):6s} "
+          f"vlm={(st.visual_analysis or {}).get('status', '-'):11s} cache={st.from_cache} {time.time() - t0:5.0f}s  {st.investigation_id}{flag}")
     ok &= st.status == "completed"
 sys.exit(0 if ok else 1)

@@ -66,3 +66,23 @@ def delta_png(delta: np.ndarray, path: Path, span: float = 0.6) -> Path:
 def side_by_side(a: np.ndarray, b: np.ndarray, path: Path) -> Path:
     gap = np.full((a.shape[0], 8, 3), 255, np.uint8)
     return _save(np.hstack([a, gap, b]), path)
+
+
+def ndvi_rgb(nd: np.ndarray) -> np.ndarray:
+    return _ramp(nd, [(-0.2, (120, 80, 40)), (0.2, (230, 220, 160)), (0.5, (120, 190, 80)), (0.9, (10, 90, 30))])
+
+
+def delta_rgb(delta: np.ndarray, span: float = 0.6) -> np.ndarray:
+    return _ramp(delta, [(-span, (200, 20, 20)), (0.0, (240, 240, 240)), (span, (20, 120, 200))])
+
+
+def magnitude_rgb(mag: np.ndarray, thr: float) -> np.ndarray:
+    return _ramp(mag, [(0, (10, 10, 30)), (thr, (40, 160, 200)), (2 * thr, (255, 240, 120))])
+
+
+def binary_rgb(mask: np.ndarray, valid: np.ndarray, on=(30, 110, 230), off=(225, 225, 215)) -> np.ndarray:
+    out = np.zeros((*mask.shape, 3), np.uint8)
+    out[:] = off
+    out[mask] = on
+    out[~valid] = (60, 60, 60)
+    return out

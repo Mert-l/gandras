@@ -36,11 +36,21 @@ class InvestigationOptions(BaseModel):
 
 
 class CreateInvestigation(BaseModel):
-    mode: Literal["mining", "forest"]
     claim: str = Field(min_length=5, max_length=500)
+    indicator: str = Field(default="auto", max_length=40, pattern=r"^[a-z_]+$")
+    mode: Literal["mining", "forest"] | None = None  # legacy alias for indicator
     case_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-z0-9_]+$")
     custom: CustomLocation | None = None
     options: InvestigationOptions = Field(default_factory=InvestigationOptions)
+
+    @model_validator(mode="after")
+    def _resolve_indicator(self) -> "CreateInvestigation":
+        from app.indicators import LEGACY_MODES, REGISTRY
+        if self.mode and self.indicator == "auto":
+            self.indicator = LEGACY_MODES[self.mode]
+        if self.indicator != "auto" and self.indicator not in REGISTRY:
+            raise ValueError(f"Unknown indicator '{self.indicator}'. Use 'auto' or one of: {', '.join(REGISTRY)}")
+        return self
 
     @model_validator(mode="after")
     def _one_location(self) -> "CreateInvestigation":

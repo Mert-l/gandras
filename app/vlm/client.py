@@ -115,17 +115,18 @@ def _prepare_image(src: Path, tmpdir: Path, idx: int) -> Path:
         return out
 
 
-def interpret_images(before_png: Path, after_png: Path, overlay_png: Path, *, mode: Literal["forest", "mining"],
-                     claim: str, before_date: str, after_date: str, measurements: dict) -> VLMResult:
+def interpret_images(before_png: Path, after_png: Path, overlay_png: Path, *, mode: str,
+                     claim: str, before_date: str, after_date: str, measurements: dict,
+                     guidance: str | None = None) -> VLMResult:
     """Ask the VLM to interpret the image triplet. Never raises; never fabricates a result."""
     s = get_settings()
     t0 = time.monotonic()
     attempts = 0
     try:
-        if mode not in ("forest", "mining"):
-            raise ValueError(f"unknown mode {mode!r}")
+        if not guidance and mode not in ("forest", "mining"):
+            raise ValueError(f"unknown mode {mode!r} and no guidance given")
         user = build_user_prompt(mode=mode, claim=claim, before_date=before_date, after_date=after_date,
-                                 measurements=measurements or {})
+                                 measurements=measurements or {}, guidance=guidance)
         with tempfile.TemporaryDirectory(prefix="vlm_") as td:
             imgs = [_prepare_image(p, Path(td), i) for i, p in enumerate((before_png, after_png, overlay_png))]
             analysis, attempts = _structured_chat_impl(

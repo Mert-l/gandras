@@ -41,6 +41,38 @@ All numbers come from Sentinel-2 L2A (`sentinel-2-c1-l2a`, Element 84 Earth Sear
   (`change_within_bare_ground`, `vegetated_to_bare`, …), not a cause.
 - Output is **candidate surface disturbance**, never "excavation".
 
+## Water (WaterCheck)
+
+- MNDWI = (B03 − B11)/(B03 + B11); water where MNDWI > 0 on each date (configurable).
+- New water = not water before ∧ water after; lost water = the reverse; 3×3 opening; regions < 0.5 ha removed.
+- Evidence follows the claimed direction (increase / decrease / any); the other direction is shown amber.
+- Reports water extent on both dates and the net change; extent only, never volume or depth.
+
+## Construction & built-up (BuildCheck)
+
+- Robust multispectral change (MAD threshold, radiometrically normalized) restricted to surfaces that are
+  non-vegetated (NDVI < 0.30) and not water afterwards.
+- Evidence = new built-like surface (roofs, paving): see `app/indicators/built_up.py` for the exact rule,
+  tuned on real construction sites and a mine (where scraped soil must not count as a building).
+- Cleared or bare ground / earthworks is reported in amber and is not evidence of a building.
+- Cannot resolve single small buildings (< ~0.5 ha), and never establishes completion, occupancy, permits
+  or legality — "illegally built" claims are tested only for whether new built surface appeared.
+
+## Fire (BurnCheck)
+
+- NBR = (B08 − B12)/(B08 + B12); dNBR = NBR_before − NBR_after.
+- Evidence: dNBR > 0.27 (moderate-low severity and above) with an NDVI drop > 0.1; regions ≥ 1 ha;
+  area by severity class. Scars fade with regrowth.
+
+## Vegetation cover
+
+- NDVI loss (> 0.45 → < 0.25, Δ < −0.2) and gain (the reverse) for any vegetation; direction from the claim.
+
+## Generic fallback
+
+- Same change detector as surface disturbance. Verdicts limited to supported (no-change claim,
+  negligible change, low confidence) or inconclusive — never contradicted.
+
 ## Corroboration
 
 An independent scene ≥ 15 days from the after scene is analysed against the same before scene.
@@ -50,17 +82,15 @@ again (5×5 dilation for misregistration). ≥ 60% strong, < 30% weak.
 
 ## Verdict rules (`app/verification/evaluator.py`)
 
-| | Forest | Mining |
-|---|---|---|
-| Key metric | probable clearing ha | candidate disturbance ha |
-| Significant | ≥ 5 ha | ≥ 10 ha |
-| Negligible | < 1 ha | < 2 ha |
-| Change counts if | significant (and not shown transient) | significant **and** persistence ≥ 60% |
+Key metric is the indicator's `evidence_ha` in the claimed direction. Significant / negligible areas:
+forest 5 / 1 ha, vegetation 5 / 1, surface 10 / 2, built-up 2 / 0.5, water 5 / 1, burn 5 / 1, generic 5 / 1.
+Change counts if significant, not shown transient (< 30% persisting), and — for surface, built-up and
+generic — confirmed by ≥ 60% persistence in an independent observation.
 
 - Common valid area < 70% → inconclusive.
 - "No change" claims: change → contradicted; negligible → supported (max medium confidence);
   otherwise inconclusive. "Change" claims: mirrored.
 - Confidence = points (valid ≥ 90%, seasonal match, persistence, VLM agreement, margin);
-  MineWatch capped at medium. No numeric probabilities.
+  capped per indicator (see docs/architecture.md). No numeric probabilities.
 
 All thresholds are starting heuristics, configurable, and shown in each report's methodology.

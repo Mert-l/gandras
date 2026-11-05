@@ -36,6 +36,12 @@ async def health() -> dict:
     }
 
 
+@router.get("/indicators")
+def indicators() -> list[dict]:
+    from app.indicators import public_list
+    return public_list()
+
+
 @router.get("/demo-cases")
 def demo_cases() -> list[dict]:
     return load_demo_cases()
@@ -44,7 +50,7 @@ def demo_cases() -> list[dict]:
 @router.post("/investigations", status_code=202)
 def create_investigation(req: CreateInvestigation):
     try:
-        st = svc.create(req.mode, req.claim.strip(), req.case_id,
+        st = svc.create(req.indicator, req.claim.strip(), req.case_id,
                         req.custom.model_dump() if req.custom else None, req.options.model_dump())
     except svc.RequestError as e:
         return err(400, e.code, str(e))

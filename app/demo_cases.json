@@ -2,7 +2,7 @@
   {
     "id": "mine_quebrada_blanca",
     "name": "Quebrada Blanca copper mine area, Tarapacá, Chile",
-    "mode": "mining",
+    "mode": "surface_disturbance",
     "default_claim": "The mining operation at this site stopped expanding after 2019.",
     "latitude": -20.985,
     "longitude": -68.8,
@@ -10,12 +10,13 @@
     "before_date": "2019-11-15",
     "after_date": "2023-11-15",
     "description": "High-altitude open-pit copper operation in the Atacama. Pre-scouted with real Sentinel-2 L2A scenes (Nov 2019 vs Nov 2023, both cloud-free over the AOI); candidate surface disturbances appear around waste dumps, pit walls and a new linear feature.",
-    "location_source": "Mine location per Wikipedia 'Quebrada Blanca' (−21.0043, −68.8010); AOI centre is ~2 km north, inside the 6 km AOI."
+    "location_source": "Mine location per Wikipedia 'Quebrada Blanca' (−21.0043, −68.8010); AOI centre is ~2 km north, inside the 6 km AOI.",
+    "indicator": "surface_disturbance"
   },
   {
     "id": "mine_bingham_canyon",
     "name": "Bingham Canyon open-pit mine, Utah, USA",
-    "mode": "mining",
+    "mode": "surface_disturbance",
     "default_claim": "The Bingham Canyon pit has not expanded since 2019.",
     "latitude": 40.523,
     "longitude": -112.15,
@@ -23,12 +24,13 @@
     "before_date": "2019-07-15",
     "after_date": "2024-07-15",
     "description": "Large, long-established open pit. Summer 2019 vs summer 2024; real scenes show localised changes inside the existing pit and on its walls.",
-    "location_source": "Mine location per Wikipedia 'Bingham Canyon Mine' (40.523, −112.151)."
+    "location_source": "Mine location per Wikipedia 'Bingham Canyon Mine' (40.523, −112.151).",
+    "indicator": "surface_disturbance"
   },
   {
     "id": "forest_sw_amazon_frontier",
     "name": "Southwestern Amazon frontier site, Brazil (−9.54, −65.93)",
-    "mode": "forest",
+    "mode": "forest_clearing",
     "default_claim": "No forest was cleared in this area after 2020.",
     "latitude": -9.54,
     "longitude": -65.932,
@@ -36,12 +38,13 @@
     "before_date": "2020-07-22",
     "after_date": "2023-07-22",
     "description": "Located by a 20 km wide scan of real dry-season imagery (Jul 2020 vs Jul 2023) for forest-like canopy loss. Mix of forest, pasture and newly bare ground.",
-    "location_source": "Coordinates chosen from imagery (no named site claimed)."
+    "location_source": "Coordinates chosen from imagery (no named site claimed).",
+    "indicator": "forest_clearing"
   },
   {
     "id": "forest_amazonas_control",
     "name": "Southern Amazonas forest control site, Brazil (−8.25, −66.95)",
-    "mode": "forest",
+    "mode": "forest_clearing",
     "default_claim": "This forest area has remained intact since 2020.",
     "latitude": -8.25,
     "longitude": -66.95,
@@ -49,6 +52,77 @@
     "before_date": "2020-07-25",
     "after_date": "2024-07-25",
     "description": "Continuous canopy in the pre-scout (Jul 2020 vs Jul 2024): no candidate loss regions were found. Included as a control where a no-clearing claim can be tested.",
-    "location_source": "Coordinates chosen from imagery (no named site claimed)."
+    "location_source": "Coordinates chosen from imagery (no named site claimed).",
+    "indicator": "forest_clearing"
+  },
+  {
+    "id": "build_giga_texas",
+    "name": "Tesla Gigafactory Texas site, Austin, USA",
+    "indicator": "built_up",
+    "mode": "built_up",
+    "default_claim": "No large construction took place on this site after 2020.",
+    "latitude": 30.2209,
+    "longitude": -97.6186,
+    "width_km": 5,
+    "before_date": "2020-05-15",
+    "after_date": "2023-06-15",
+    "description": "Fields and scrub east of Austin in May 2020; by June 2023 the factory roof and paved lots show as new built-like surface (red), with graded ground around it shown separately (amber).",
+    "location_source": "Wikipedia 'Gigafactory Texas' (30.2209, −97.6186)."
+  },
+  {
+    "id": "build_giga_berlin",
+    "name": "Tesla Gigafactory Berlin-Brandenburg site, Grünheide, Germany",
+    "indicator": "built_up",
+    "mode": "built_up",
+    "default_claim": "The factory on this site was completed by 2023.",
+    "latitude": 52.395,
+    "longitude": 13.79,
+    "width_km": 4,
+    "before_date": "2019-07-15",
+    "after_date": "2023-07-15",
+    "description": "Pine forest in July 2019; by July 2023 the halls and paving show as new built-like surface, and a large cleared sand area to the north as earthworks. The app can show new built surface, not that a factory is 'completed'.",
+    "location_source": "Wikipedia 'Gigafactory Berlin-Brandenburg' (52.395, 13.790)."
+  },
+  {
+    "id": "build_loecknitztal_control",
+    "name": "Löcknitztal nature reserve, Brandenburg, Germany (control)",
+    "indicator": "built_up",
+    "mode": "built_up",
+    "default_claim": "No construction took place in this protected area after 2019.",
+    "latitude": 52.426187,
+    "longitude": 13.89719,
+    "width_km": 3,
+    "before_date": "2019-07-15",
+    "after_date": "2023-07-15",
+    "description": "Protected river valley about 7.5 km from Giga Berlin. Pre-scout found no new built surface or earthworks between July 2019 and July 2023.",
+    "location_source": "German Wikipedia 'Naturschutzgebiet Löcknitztal' (52°25′34″N, 13°53′50″E)."
+  },
+  {
+    "id": "water_lake_mead_lv_bay",
+    "name": "Lake Mead, Las Vegas Bay, Nevada, USA",
+    "indicator": "water",
+    "mode": "water",
+    "default_claim": "Lake Mead's shoreline at Las Vegas Bay has not receded since 2019.",
+    "latitude": 36.11,
+    "longitude": -114.82,
+    "width_km": 6,
+    "before_date": "2019-07-15",
+    "after_date": "2021-08-15",
+    "description": "Bay head and coves of Lake Mead, July 2019 vs August 2021 (Lake Mead reached a record low in 2021). Sentinel-2 C1 L2A has almost no 2022 scenes here, so 2021 is used.",
+    "location_source": "AOI placed from imagery ~5 km ESE of the Las Vegas Wash point on Wikipedia 'Las Vegas Wash' (36.132, −114.879), at the bay head."
+  },
+  {
+    "id": "burn_caldor_grizzly_flats",
+    "name": "Caldor Fire area, Grizzly Flats, California, USA",
+    "indicator": "burn",
+    "mode": "burn",
+    "default_claim": "No fire burned around Grizzly Flats in summer 2021.",
+    "latitude": 38.6364,
+    "longitude": -120.5275,
+    "width_km": 5,
+    "before_date": "2021-07-15",
+    "after_date": "2021-11-05",
+    "description": "Forest around Grizzly Flats before and after the August 2021 Caldor Fire. Same-year comparison, so the dates are flagged as seasonally different.",
+    "location_source": "Wikipedia 'Grizzly Flats, California' (38.6364, −120.5275); the page describes the Caldor Fire destroying ~500 buildings there on 17 Aug 2021."
   }
 ]

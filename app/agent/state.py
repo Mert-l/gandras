@@ -14,7 +14,6 @@ from app.database import now
 DEMO_CASES_PATH = PROJECT_ROOT / "app" / "demo_cases.json"
 ASSETS_ROOT = PROJECT_ROOT / "data" / "investigations"
 
-Mode = Literal["mining", "forest"]
 
 
 def load_demo_cases() -> list[dict]:
@@ -45,8 +44,11 @@ class Step(BaseModel):
 
 class InvestigationState(BaseModel):
     investigation_id: str
-    mode: Mode
+    mode: str                                # requested indicator ("auto" or id) until resolved, then the resolved id
     claim: str
+    requested_indicator: str = "auto"
+    indicator: str | None = None
+    indicator_info: dict | None = None
     case_id: str | None = None
     status: Literal["queued", "running", "completed", "failed", "interrupted"] = "queued"
     created_at: str = Field(default_factory=now)

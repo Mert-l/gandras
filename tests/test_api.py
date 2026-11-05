@@ -63,8 +63,8 @@ def test_create_rejects_bad_requests():
                                                    "before_date": "2020-01-01", "after_date": "2021-01-01"}})
     assert r.status_code == 422
     assert c.post("/investigations", json={"mode": "forest", "claim": "x" * 501, "case_id": "forest_amazonas_control"}).status_code == 422
-    r = c.post("/investigations", json={"mode": "mining", "claim": "No clearing after 2020", "case_id": "forest_amazonas_control"})
-    assert r.status_code == 400
+    r = c.post("/investigations", json={"indicator": "volcano", "claim": "No clearing after 2020", "case_id": "forest_amazonas_control"})
+    assert r.status_code == 422
 
 
 def test_create_returns_202_and_runs(monkeypatch):
@@ -104,3 +104,24 @@ def test_restart_marks_running_as_interrupted():
     assert database.mark_interrupted() == 1
     s = database.load("inv_aaaaaaaaaa")
     assert s["status"] == "interrupted" and s["error"]["code"] == "INTERRUPTED" and s["steps"][0]["status"] == "failed"
+
+
+
+def test_indicators_listed():
+    r = TestClient(app).get("/indicators").json()
+    ids = {i["id"] for i in r}
+    assert {"forest_clearing", "surface_disturbance", "built_up", "water", "burn", "generic_change"} <= ids
+    assert sum(i["is_fallback"] for i in r) == 1
+
+
+def test_create_with_auto_and_legacy_mode(monkeypatch):
+    from app.services import investigations as svc
+    monkeypatch.setattr(svc._executor, "submit", lambda fn, inv: None)
+    c = TestClient(app)
+    r = c.post("/investigations", json={"claim": "A building was illegally built here after 2020",
+                                        "case_id": "forest_amazonas_control"})
+    g = c.get(f"/investigations/{r.json()['investigation_id']}").json()
+    assert g["requested_indicator"] == "auto" and g["indicator"] is None
+    r = c.post("/investigations", json={"mode": "mining", "claim": "The pit stopped expanding", "case_id": "mine_bingham_canyon"})
+    g = c.get(f"/investigations/{r.json()['investigation_id']}").json()
+    assert g["requested_indicator"] == "surface_disturbance"

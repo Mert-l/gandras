@@ -1,6 +1,6 @@
 """Run one investigation synchronously from the command line (same code path as the API worker).
 
-Usage: python scripts/run_investigation.py CASE_ID ["claim text"] [--no-llm]
+Usage: python scripts/run_investigation.py CASE_ID ["claim text"] [--no-llm] [--indicator=ID]
 """
 import json
 import sys
@@ -16,7 +16,8 @@ args = [a for a in sys.argv[1:] if not a.startswith("--")]
 case = next(c for c in load_demo_cases() if c["id"] == args[0])
 claim = args[1] if len(args) > 1 else case["default_claim"]
 database.init_db()
-st = InvestigationState(investigation_id=new_id(), mode=case["mode"], claim=claim, case_id=case["id"],
+req = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--indicator=")), "auto")
+st = InvestigationState(investigation_id=new_id(), mode=req, requested_indicator=req, claim=claim, case_id=case["id"],
                         location={k: case[k] for k in ("name", "latitude", "longitude", "width_km")},
                         temporal_scope={"before_target": case["before_date"], "after_target": case["after_date"]})
 st = Runner(st, use_llm="--no-llm" not in sys.argv).run()

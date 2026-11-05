@@ -11,9 +11,11 @@ Browser (app/static: vanilla JS)  ──poll──►  FastAPI (app/api/routes.p
                            ├─ planner.allowed_actions(state)   which actions are valid now
                            ├─ planner.llm_decision(...)        Qwen picks one (schema-constrained), validated
                            │    └─ rule_decision(...)          deterministic fallback
+                           ├─ claims.py                        claim → (indicator, asserts, direction), LLM + rule cross-check
                            └─ tools.py                         executes the action
                                 ├─ satellite/  STAC search, local SCL quality, calibrated grid-aligned bands
-                                ├─ analysis/   NDVI loss · surface disturbance · regions · PNG products
+                                ├─ indicators/ registry: forest · vegetation · surface · built-up · water · burn · generic
+                                ├─ analysis/   shared index maths · regions · PNG products
                                 ├─ vlm/        Qwen visual interpretation (never computes numbers)
                                 └─ corroborate  independent extra scene → persistence of change
                          verification/evaluator.py  deterministic verdict on the exact claim type
@@ -29,10 +31,42 @@ Browser (app/static: vanilla JS)  ──poll──►  FastAPI (app/api/routes.p
 | VLM | what is visibly changed, alternatives, limits | measure, set the verdict alone |
 | Verification engine | verdict + confidence from rules | trust model text for polarity or contradiction |
 
+## Indicators
+
+Each indicator (`app/indicators/*.py`) is one physical signal plus how to judge claims about it:
+bands, deterministic `analyze(before, after, valid, grid, direction)`, allowed directions, evidence
+label, significant/negligible areas, whether persistence must be confirmed, a confidence cap, keywords,
+example claims, report wording and VLM guidance. Everything else (agent, verification, UI) is generic.
+
+| id | Signal | Directions | Persistence required | Confidence cap |
+|---|---|---|---|---|
+| forest_clearing | NDVI drop from canopy-like pixels + BSI rise | decrease | no | high |
+| vegetation_cover | NDVI loss / gain (any vegetation) | increase, decrease | no | medium |
+| surface_disturbance | robust multispectral change (mining, earthworks) | any | yes | medium |
+| built_up | new built-like surface (construction) | increase | yes | medium |
+| water | MNDWI water maps on both dates | increase, decrease, any | no | high |
+| burn | dNBR (B08 vs B12) + NDVI drop | increase | no | medium |
+| generic_change | multispectral change (fallback) | any | yes | low; never "contradicted" |
+
+To add an indicator: write `analyze` returning `output(result, evidence_mask, valid, other=..., previews=...,
+legend=...)` with `result["evidence_ha"]` and `result["regions"]`, fill the `Indicator` fields, register
+it in `app/indicators/__init__.py`, add tests in `tests/test_indicators.py` and one scouted real demo case.
+
+## Claim interpretation
+
+`app/agent/claims.py` reads the claim as (indicator, asserts change | no_change, direction).
+The LLM chooses from the registry (or the user fixes the indicator); keyword rules cross-check:
+- polarity (asserts) must match the rules, else the rules win;
+- the LLM cannot pick an indicator the claim has no keywords for when another indicator's keywords match;
+- explicit direction words override a conflicting LLM direction;
+- the LLM cannot reject a claim that names physical/site terms; truly non-physical claims → `UNSUPPORTED_CLAIM`;
+- physical claims no indicator covers → `generic_change` fallback.
+Overrides are recorded in `claim_interpretation.override` and shown in the timeline.
+
 ## Agent loop
 
 Actions: `find_before_observation`, `find_after_observation`, `search_more_imagery`,
-`analyze_vegetation` / `analyze_surface`, `interpret_images`, `corroborate_change`,
+`analyze_<indicator>`, `interpret_images`, `corroborate_change`,
 `evaluate_evidence`, `finalize`.
 
 - `allowed_actions` encodes preconditions (e.g. analysis needs both scenes; finalize needs an
@@ -51,7 +85,7 @@ The claim text reaches two model prompts. Guards:
   reading is used (recorded in `claim_interpretation.override`); on-topic claims cannot be rejected
   by the LLM alone;
 - the VLM prompt fences the claim between markers and labels it untrusted;
-- a MineWatch contradiction requires measured persistence; VLM agreement only adjusts confidence;
+- indicators flagged `requires_persistence` need measured persistence to count change; VLM agreement only adjusts confidence;
 - the planner can only pick from validated actions; no shell, filesystem or arbitrary network access.
 
 ## Persistence and failure

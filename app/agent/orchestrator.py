@@ -17,10 +17,9 @@ from app.verification import evaluator, report
 log = logging.getLogger(__name__)
 
 PROGRESS = {"interpret_claim": 8, "find_before_observation": 22, "find_after_observation": 36,
-            "search_more_imagery": None, "analyze_vegetation": 55, "analyze_surface": 55, "interpret_images": 72,
+            "search_more_imagery": None, "interpret_images": 72,
             "corroborate_change": 85, "evaluate_evidence": 90, "finalize": 100}
-COUNTED = {"find_before_observation", "find_after_observation", "search_more_imagery", "analyze_vegetation",
-           "analyze_surface", "interpret_images", "corroborate_change", "evaluate_evidence"}
+
 
 
 class Runner:
@@ -49,7 +48,7 @@ class Runner:
         step.finished_at = now()
         if details:
             step.details.update(details)
-        p = PROGRESS.get(step.action)
+        p = 55 if step.action.startswith("analyze_") else PROGRESS.get(step.action)
         if p:
             self.st.progress_percent = max(self.st.progress_percent, p)
         self._save()
@@ -108,47 +107,36 @@ class Runner:
 
     # ------------------------------------------------------------ steps
     def _interpret_claim(self) -> bool:
+        from app.agent import claims
+        from app.indicators import get
         st = self.st
-        step = self._begin("interpret_claim", "Every investigation starts by typing the claim.", "system")
-        ci, by = (planner.interpret_claim_llm(st.mode, st.claim), "llm") if self.use_llm else (None, "rule")
-        valid = {"forest": {"no_forest_loss", "forest_loss_occurred"}, "mining": {"no_expansion", "expansion_occurred"}}[st.mode]
-        override = None
-        if ci is None:
-            ci, by = planner.interpret_claim_rules(st.mode, st.claim), "rule"
-        elif (not ci.supported or ci.claim_type not in valid) and planner.is_on_topic(st.mode, st.claim):
-            # A small model must not unilaterally reject a claim that names the surface features
-            # this mode measures; fall back to the deterministic interpretation and record it.
-            override = f"LLM output ({ci.claim_type}, supported={ci.supported}) overridden: claim names {st.mode} surface terms."
-            ci, by = planner.interpret_claim_rules(st.mode, st.claim), "rule"
-        elif ci.supported and ci.claim_type not in valid:
-            ci, by = planner.interpret_claim_rules(st.mode, st.claim), "rule"
-        elif ci.supported:
-            # Claim polarity flips the verdict, and the claim is untrusted text: require the LLM's
-            # reading to agree with the deterministic one; otherwise use the deterministic reading.
-            rules = planner.interpret_claim_rules(st.mode, st.claim)
-            if rules.claim_type != ci.claim_type:
-                override = (f"LLM read the claim as '{ci.claim_type}' but keyword rules read '{rules.claim_type}'; "
-                            "using the deterministic reading.")
-                ci, by = rules, "rule"
+        step = self._begin("interpret_claim", "Every investigation starts by reading what the claim asserts.", "system")
+        reading, by, unsupported = claims.interpret(st.claim, st.requested_indicator, self.use_llm)
         step.decided_by = by
-        d = ci.model_dump()
-        if override:
-            d["override"] = override
-        bt = date.fromisoformat(st.temporal_scope["before_target"])
-        if ci.referenced_year and ci.referenced_year != bt.year:
-            d["reference_gap_note"] = (f"The claim refers to {ci.referenced_year}; the comparison baseline is the first clear "
-                                       f"observation near {bt.isoformat()}.")
-        d["referenced_date"] = ci.referenced_year
-        st.claim_interpretation = d
-        if not ci.supported or ci.claim_type == "unsupported":
-            self._end(step, f"Claim cannot be tested with satellite imagery: {ci.explanation}", d, ok=False)
-            st.status, st.error = "failed", {"code": "UNSUPPORTED_CLAIM", "message": ci.explanation}
+        if reading is None:
+            self._end(step, f"Claim cannot be tested with satellite imagery: {unsupported}", {"unsupported": unsupported}, ok=False)
+            st.status, st.error = "failed", {"code": "UNSUPPORTED_CLAIM", "message": unsupported}
             st.current_step = None
             self._save()
             return False
-        note = f" Note: {override}" if override else ""
-        self._end(step, f"Claim type '{ci.claim_type}'{note}: looking for {ci.observable_target} between "
-                        f"{st.temporal_scope['before_target']} and {st.temporal_scope['after_target']}.", d)
+        ind = get(reading.indicator)
+        st.indicator, st.mode, st.indicator_info = ind.id, ind.id, ind.info()
+        d = reading.model_dump()
+        bt = date.fromisoformat(st.temporal_scope["before_target"])
+        if reading.referenced_year and reading.referenced_year != bt.year:
+            d["reference_gap_note"] = (f"The claim refers to {reading.referenced_year}; the comparison baseline is the first clear "
+                                       f"observation near {bt.isoformat()}.")
+        st.claim_interpretation = d
+        how = "chosen by you" if st.requested_indicator != "auto" else "auto-detected"
+        asserts = "that no" if reading.asserts == "no_change" else "that"
+        dir_txt = f" ({reading.direction})" if reading.direction != "any" else ""
+        summary = (f"Indicator: {ind.name} ({how}). The claim asserts {asserts} {ind.evidence_label}{dir_txt} occurred "
+                   f"between {st.temporal_scope['before_target']} and {st.temporal_scope['after_target']}.")
+        if ind.is_fallback:
+            summary += " No specific indicator matched; using the general surface-change fallback (verdict limited)."
+        if reading.override:
+            summary += f" Note: {reading.override}"
+        self._end(step, summary, d)
         return True
 
     def _execute(self, action: str, reason: str, params: dict, by: str):
@@ -164,7 +152,7 @@ class Runner:
             st.extra_searches += 1
             center = date.fromisoformat(st.temporal_scope[f"{role}_target"]) + timedelta(days=params["shift_days"])
             summ, det = tools.find_observation(st, role, center, params["window_days"])
-        elif action in ("analyze_vegetation", "analyze_surface"):
+        elif action.startswith("analyze_"):
             summ, det = tools.run_analysis(st)
         elif action == "interpret_images":
             summ, det = self._interpret_images()
@@ -189,7 +177,9 @@ class Runner:
         meas["regions"] = [{k: r.get(k) for k in ("id", "area_ha", "spectral_pattern", "indicators") if k in r}
                            for r in a["regions"][:8]]
         s = get_settings()
-        key = cache.key("vlm", {"model": s.vlm_model, "mode": st.mode, "claim": st.claim,
+        from app.indicators import get
+        ind = get(st.indicator)
+        key = cache.key("vlm", {"model": s.vlm_model, "indicator": ind.id, "claim": st.claim,
                                 "scenes": [st.selected_scenes[r]["scene"]["scene_id"] for r in ("before", "after")],
                                 "grid": st.methodology["grid"], "meas": meas})
         hit = cache.get_json(key)
@@ -199,7 +189,7 @@ class Runner:
         else:
             try:
                 from app.vlm.client import interpret_images
-                r = interpret_images(d / "before.png", d / "after.png", d / "overlay.png", mode=st.mode, claim=st.claim,
+                r = interpret_images(d / "before.png", d / "after.png", d / "overlay.png", mode=ind.id, guidance=ind.vlm_guidance, claim=st.claim,
                                      before_date=st.imagery["before"]["date"], after_date=st.imagery["after"]["date"],
                                      measurements=meas)
                 res = r.model_dump(mode="json")
@@ -217,9 +207,15 @@ class Runner:
         return (f"{prefix}{res['model']}: {an['summary']} (consistency with measurements: {an['changes_consistent_with_measurements']})",
                 {"observations": len(an["observations"]), "cached": res.get("cached", False)})
 
+    def _assess(self):
+        from app.indicators import get
+        st = self.st
+        return evaluator.assess(get(st.indicator), st.claim_interpretation["direction"], st.analysis,
+                                st.corroboration, st.visual_analysis)
+
     def _evaluate(self):
         st = self.st
-        a = evaluator.assess(st.mode, st.analysis, st.corroboration, st.visual_analysis)
+        a = self._assess()
         st.evidence_assessment = a.model_dump()
         txt = (f"Change level: {a.change_level} ({a.key_metric} = {a.key_value_ha:.1f} ha). "
                f"Data sufficient: {'yes' if a.data_sufficient else 'no'}. "
@@ -231,9 +227,12 @@ class Runner:
     def _finalize(self, by: str, reason: str, budget_hit: bool = False):
         st = self.st
         step = self._begin("finalize", reason, by)
-        a = evaluator.assess(st.mode, st.analysis, st.corroboration, st.visual_analysis)
+        from app.indicators import get
+        ind = get(st.indicator)
+        ci = st.claim_interpretation
+        a = self._assess()
         st.evidence_assessment = a.model_dump()
-        v = evaluator.verdict(st.mode, st.claim_interpretation["claim_type"], st.analysis, a, st.visual_analysis)
+        v = evaluator.verdict(ind, ci["asserts"], ci["direction"], st.analysis, a, st.visual_analysis)
         sec = report.build_sections(st)
         if st.analysis is None:
             missing = [r for r in ("before", "after") if r not in st.selected_scenes]
@@ -247,9 +246,7 @@ class Runner:
         st.limitations = sec["limitations"]
         if st.analysis:
             st.measurements = {k: v_ for k, v_ in st.analysis.items() if k != "stretch"}
-            key = "probable_clearing_ha" if st.mode == "forest" else "candidate_changed_area_ha"
-            st.headline = {"label": "Probable forest clearing" if st.mode == "forest" else "Candidate surface disturbance",
-                           "value": st.analysis[key], "unit": "ha"}
+            st.headline = {"label": ind.evidence_label.capitalize(), "value": st.analysis["evidence_ha"], "unit": "ha"}
         st.sources = [{"type": "satellite", "provider": "Element 84 Earth Search", "role": role,
                        "collection": x["scene"]["collection"], "scene_id": x["scene"]["scene_id"],
                        "acquired_at": x["scene"]["acquired_at"], "url": x["scene"].get("self_href"),

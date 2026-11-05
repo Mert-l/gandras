@@ -18,13 +18,11 @@ class RequestError(ValueError):
         self.code = code
 
 
-def create(mode: str, claim: str, case_id: str | None, custom: dict | None, options: dict | None) -> InvestigationState:
+def create(indicator: str, claim: str, case_id: str | None, custom: dict | None, options: dict | None) -> InvestigationState:
     if case_id:
         case = next((c for c in load_demo_cases() if c["id"] == case_id), None)
         if case is None:
             raise RequestError("INVALID_LOCATION", f"Unknown case_id '{case_id}'")
-        if case["mode"] != mode:
-            raise RequestError("UNSUPPORTED_CLAIM", f"Case '{case_id}' is a {case['mode']} case, not {mode}")
         loc = {"name": case["name"], "latitude": case["latitude"], "longitude": case["longitude"], "width_km": case["width_km"]}
         scope = {"before_target": case["before_date"], "after_target": case["after_date"]}
     elif custom:
@@ -33,7 +31,8 @@ def create(mode: str, claim: str, case_id: str | None, custom: dict | None, opti
         scope = {"before_target": str(custom["before_date"]), "after_target": str(custom["after_date"])}
     else:
         raise RequestError("INVALID_LOCATION", "Provide a case_id or a custom location")
-    st = InvestigationState(investigation_id=new_id(), mode=mode, claim=claim, case_id=case_id, location=loc,
+    st = InvestigationState(investigation_id=new_id(), mode=indicator, requested_indicator=indicator, claim=claim,
+                            indicator=None if indicator == "auto" else indicator, case_id=case_id, location=loc,
                             temporal_scope=scope, options=options or {})
     database.save(st.model_dump(mode="json"))
     _executor.submit(_run, st.investigation_id)

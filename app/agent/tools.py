@@ -12,8 +12,6 @@ import numpy as np
 
 from app.agent.state import InvestigationState, asset_dir
 from app.analysis import visualize as viz
-from app.analysis.mining import analyze_surface_disturbance
-from app.analysis.vegetation import analyze_vegetation_change
 from app.config import get_settings
 from app.satellite import cache
 from app.satellite.aoi import AOI, AnalysisGrid
@@ -84,54 +82,58 @@ def find_observation(st: InvestigationState, role: str, center: date, window_day
 # ---------------------------------------------------------------- change analysis
 
 def _load_pair(st: InvestigationState, before_role="before", after_role="after"):
+    from app.indicators import get
     grid = grid_of(st)
+    bands = get(st.indicator).bands
     b, a = _scene(st.selected_scenes[before_role]), _scene(st.selected_scenes[after_role])
-    B, A = load_scene(b, grid), load_scene(a, grid)
+    B, A = load_scene(b, grid, bands=bands), load_scene(a, grid, bands=bands)
     vb, va = valid_mask(B["SCL"]), valid_mask(A["SCL"])
     return grid, b, a, B, A, vb, va, common_valid(vb, va)
 
 
+def _direction(st: InvestigationState) -> str:
+    return (st.claim_interpretation or {}).get("direction", "any")
+
+
 def run_analysis(st: InvestigationState) -> tuple[str, dict]:
+    from app.indicators import get
+    ind = get(st.indicator)
     grid, b, a, B, A, vb, va, both = _load_pair(st)
     if both.mean() < 0.3:
         raise ToolError("INSUFFICIENT_CLEAR_IMAGERY", f"Only {both.mean():.0%} of the AOI is clear on both dates")
-    res = (analyze_vegetation_change if st.mode == "forest" else analyze_surface_disturbance)(B, A, both, grid)
+    res = ind.analyze(B, A, both, grid, _direction(st))
     r = res["result"]
     pair = describe_pair(b, a)
     r["pair"] = pair
     r["common_valid_pct"] = round(100 * float(both.mean()), 2)
+    r["indicator"] = ind.id
+    r["evidence_label"] = ind.evidence_label
 
     out = asset_dir(st.investigation_id)
     stretch = shared_stretch([B, A], [both, both])
     rgb_b, rgb_a = render_rgb(B, stretch, vb, 1.4), render_rgb(A, stretch, va, 1.4)
     viz._save(rgb_b, out / "before.png")
     viz._save(rgb_a, out / "after.png")
-    evidence = res["masks"]["evidence"]
-    other = res["masks"]["change"] & ~evidence  # forest: vegetation loss that is not probable clearing
+    evidence, other = res["masks"]["evidence"], res["masks"].get("other")
     viz.overlay(rgb_a, evidence, r["regions"], out / "overlay.png", other=other)
     viz.mask_rgba(evidence, out / "mask.png", other=other)
     extra = {}
-    if st.mode == "forest":
-        viz.ndvi_png(res["layers"]["ndvi_before"], out / "ndvi_before.png")
-        viz.ndvi_png(res["layers"]["ndvi_after"], out / "ndvi_after.png")
-        viz.delta_png(res["layers"]["delta"], out / "ndvi_delta.png")
-        extra = {"NDVI before": "ndvi_before.png", "NDVI after": "ndvi_after.png", "NDVI change": "ndvi_delta.png"}
-    else:
-        viz.delta_png(res["layers"]["delta_bsi"], out / "bsi_delta.png", span=0.3)
-        mag = res["layers"]["magnitude"]
-        viz._save(viz._ramp(mag, [(0, (10, 10, 30)), (r["thresholds"]["magnitude_threshold_used"], (40, 160, 200)),
-                                 (2 * r["thresholds"]["magnitude_threshold_used"], (255, 240, 120))]), out / "change_magnitude.png")
-        extra = {"Bare-soil index change": "bsi_delta.png", "Spectral change magnitude": "change_magnitude.png"}
+    for i, (label, img) in enumerate(res["previews"].items()):
+        name = f"extra_{i}.png"
+        viz._save(img, out / name)
+        extra[label] = name
     np.save(out / "change_mask.npy", evidence)  # the mask the verdict rests on; used for persistence
-    r["overlay_legend"] = ({"red": "probable clearing (evidence)", "amber": "other vegetation-index loss"}
-                           if st.mode == "forest" else {"red": "candidate surface disturbance"})
     r["stretch"] = stretch
     st.analysis = r
-    st.methodology = {"analysis": r["method"], "thresholds": r["thresholds"], "grid": grid.model_dump(),
-                      "pixel_area_m2": grid.pixel_area_m2, "invalid_scl_classes": "no data, saturated, cloud shadow, "
-                      "cloud (medium/high), thin cirrus, snow/ice; plus 50 m buffer around cloud/shadow",
+    st.methodology = {"indicator": f"{ind.name} ({ind.id})", "analysis": r["method"], "thresholds": r["thresholds"],
+                      "grid": grid.model_dump(), "pixel_area_m2": grid.pixel_area_m2, "bands": ind.bands,
+                      "invalid_scl_classes": "no data, saturated, cloud shadow, cloud (medium/high), thin cirrus, snow/ice; "
+                                             "plus 50 m buffer around cloud/shadow",
                       "calibration": "reflectance = DN*scale + offset from each asset's STAC raster:bands",
-                      "resampling": "WarpedVRT onto common UTM grid; bilinear reflectance, nearest SCL"}
+                      "resampling": "WarpedVRT onto common UTM grid; bilinear reflectance, nearest SCL",
+                      "evidence_rules": {"significant_ha": ind.significant_ha, "negligible_ha": ind.negligible_ha,
+                                         "requires_persistence": ind.requires_persistence,
+                                         "confidence_cap": ind.confidence_cap, "is_fallback": ind.is_fallback}}
     st.imagery = {
         "before": {"date": str(b.acquired_at.date()), "acquired_at": b.acquired_at.isoformat(), "scene_id": b.scene_id,
                    "url": f"/assets/{st.investigation_id}/before.png"},
@@ -141,28 +143,22 @@ def run_analysis(st: InvestigationState) -> tuple[str, dict]:
         "mask_url": f"/assets/{st.investigation_id}/mask.png",
         "extra": {k: f"/assets/{st.investigation_id}/{v}" for k, v in extra.items()},
     }
-    if st.mode == "forest":
-        summ = (f"Valid comparison area {r['valid_area_ha']:.0f} ha ({r['common_valid_pct']:.0f}% of AOI). "
-                f"Candidate vegetation loss {r['candidate_loss_ha']:.1f} ha in {r['regions_detected']} regions (amber); "
-                f"of this, {r['forest_like_loss_ha']:.1f} ha was forest-like canopy before, and "
-                f"{r['probable_clearing_ha']:.1f} ha in {r['clearing_regions_detected']} regions also shows a "
-                f"bare-soil increase (probable clearing, red).")
-    else:
-        summ = (f"Valid comparison area {r['valid_area_ha']:.0f} ha ({r['common_valid_pct']:.0f}% of AOI). "
-                f"Candidate surface disturbance {r['candidate_changed_area_ha']:.1f} ha in {r['regions_detected']} regions "
-                f"(threshold {r['thresholds']['magnitude_threshold_used']:.3f} reflectance); "
-                f"{r['brightening_ha']:.1f} ha brightened, {r['darkening_ha']:.1f} ha darkened.")
+    summ = (f"{ind.name}: valid comparison area {r['valid_area_ha']:.0f} ha ({r['common_valid_pct']:.0f}% of AOI). "
+            f"{ind.evidence_label.capitalize()}: {r['evidence_ha']:.1f} ha in {len(r['regions'])} region(s). "
+            + " ".join(ind.observed(r, _direction(st))[:1]))
     if not pair["seasonally_comparable"]:
         summ += f" Warning: dates are {pair['seasonal_gap_days']} days apart in season."
-    details = {k: v for k, v in r.items() if k not in ("regions", "stretch")}
+    details = {k: v for k, v in r.items() if not k.endswith("regions") and k not in ("stretch",)}
     details["top_regions"] = r["regions"][:5]
     return summ, details
 
 
 def corroborate(st: InvestigationState, window_days: int = 45) -> tuple[str, dict]:
-    """Retrieve an independent later observation and test whether detected change regions persist."""
+    """Retrieve an independent later observation and test whether the evidence persists."""
+    from app.indicators import get
     if not st.analysis or not st.analysis.get("regions"):
-        raise ToolError("ANALYSIS_FAILED", "No change regions to corroborate")
+        raise ToolError("ANALYSIS_FAILED", "No evidence regions to corroborate")
+    ind = get(st.indicator)
     a1 = _scene(st.selected_scenes["after"])
     t = a1.acquired_at.date()
     center = t + timedelta(days=window_days + 15)
@@ -175,17 +171,25 @@ def corroborate(st: InvestigationState, window_days: int = 45) -> tuple[str, dic
               if abs((x.acquired_at.date() - t).days) >= 15]
     ranked = [r for r in rank_scenes(scenes, grid, center, s.max_local_invalid_percent, max_inspect=5) if r.usable]
     if not ranked:
-        return ("No independent usable observation found to check persistence of the detected change.",
+        return ("No independent usable observation found to check persistence of the evidence.",
                 {"found": False, "searched_around": center.isoformat()})
     third = ranked[0].scene
     st.selected_scenes["corroboration"] = {"scene": third.model_dump(mode="json"), "quality": ranked[0].quality}
     grid, b, a, B, A, vb, va, both = _load_pair(st, "before", "corroboration")
-    res = (analyze_vegetation_change if st.mode == "forest" else analyze_surface_disturbance)(B, A, both, grid)
+    res = ind.analyze(B, A, both, grid, _direction(st))
     import cv2
     orig = np.load(asset_dir(st.investigation_id) / "change_mask.npy")
-    new = cv2.dilate(res["masks"]["evidence"].astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    k = np.ones((5, 5), np.uint8)
+    # Persistence asks whether the change is still detected at all (evidence or secondary class):
+    # an indicator's classification can wobble between dates (e.g. a roof read as bare surface),
+    # which must not look like the change disappearing. Class stability is reported separately.
+    other = res["masks"].get("other")
+    changed = res["masks"]["evidence"] | (other if other is not None else False)
+    new = cv2.dilate(changed.astype(np.uint8), k).astype(bool)
+    same_class = cv2.dilate(res["masks"]["evidence"].astype(np.uint8), k).astype(bool)
     comparable = orig & both
     persist = float((comparable & new).sum()) / max(1, int(comparable.sum()))
+    stability = float((comparable & same_class).sum()) / max(1, int(comparable.sum()))
     per_region = []
     for r in st.analysis["regions"][:8]:
         x, y, w, h = r["bbox_px"]
@@ -193,13 +197,13 @@ def corroborate(st: InvestigationState, window_days: int = 45) -> tuple[str, dic
         frac = float((sel & new[y:y + h, x:x + w]).sum()) / max(1, int(sel.sum()))
         per_region.append({"id": r["id"], "area_ha": r["area_ha"], "persisting_fraction": round(frac, 3)})
     out = {"found": True, "scene_id": third.scene_id, "acquired_at": third.acquired_at.isoformat(),
-           "persisting_fraction": round(persist, 3), "per_region": per_region,
+           "persisting_fraction": round(persist, 3), "same_class_fraction": round(stability, 3),
+           "per_region": per_region, "evidence_mask": ind.evidence_label,
            "compared": f"{b.acquired_at.date()} vs {third.acquired_at.date()}"}
     st.corroboration = out
-    what = "probable-clearing" if st.mode == "forest" else "detected change"
-    out["evidence_mask"] = what
-    return (f"Independent observation {third.scene_id} ({third.acquired_at.date()}): {persist:.0%} of the originally "
-            f"{what} area is also detected against the before image."), out
+    return (f"Independent observation {third.scene_id} ({third.acquired_at.date()}): {persist:.0%} of the original "
+            f"{ind.evidence_label} area is still detected as changed against the before image "
+            f"({stability:.0%} in the same evidence class)."), out
 
 
 def cache_hit_rate() -> dict:

@@ -7,8 +7,11 @@
   const TERMINAL = new Set(["completed", "failed", "interrupted"]);
 
   const state = {
-    mode: "mining",
+    indicator: "auto",   // picker value: "auto" or an indicator id
+    indicators: [],      // GET /indicators
+    indicatorsError: null,
     cases: [],
+    lastCaseId: null,
     currentId: null,
     pollGen: 0,
     pollTimer: null,
@@ -52,6 +55,8 @@
     return t.charAt(0).toUpperCase() + t.slice(1);
   }
 
+  function capFirst(s) { s = String(s); return s.charAt(0).toUpperCase() + s.slice(1); }
+
   function fmtNum(v, digits) {
     if (typeof v !== "number" || !isFinite(v)) return String(v);
     const d = digits !== undefined ? digits : (Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2);
@@ -84,6 +89,14 @@
     return String(v);
   }
 
+  function detailItems(detail) {
+    return detail.map((d) => {
+      if (!d || typeof d !== "object") return String(d);
+      const loc = Array.isArray(d.loc) ? d.loc.filter((p) => p !== "body").join(".") : "";
+      return (loc ? loc + ": " : "") + (d.msg || JSON.stringify(d));
+    });
+  }
+
   // Parse every error shape the backend may produce.
   async function parseError(resp) {
     let body = null;
@@ -93,13 +106,11 @@
     if (body && body.error && typeof body.error === "object") {
       out.code = body.error.code || out.code;
       out.message = body.error.message || out.message;
+      if (Array.isArray(body.detail)) out.items = detailItems(body.detail);
     } else if (body && Array.isArray(body.detail)) {
       out.code = "VALIDATION_ERROR";
       out.message = "The request was rejected:";
-      out.items = body.detail.map((d) => {
-        const loc = Array.isArray(d.loc) ? d.loc.filter((p) => p !== "body").join(".") : "";
-        return (loc ? loc + ": " : "") + (d.msg || JSON.stringify(d));
-      });
+      out.items = detailItems(body.detail);
     } else if (body && typeof body.detail === "string") {
       out.message = body.detail;
     } else if (text) {
@@ -156,52 +167,177 @@
     }
   }
 
-  // ---------------------------------------------------------------- form
-  function setMode(mode) {
-    state.mode = mode;
-    document.querySelectorAll(".mode-card").forEach((b) => {
-      const on = b.dataset.mode === mode;
-      b.classList.toggle("active", on);
-      b.setAttribute("aria-selected", on ? "true" : "false");
-    });
+  // ---------------------------------------------------------------- indicators
+  const LEGACY_MODES = { forest: "forest_clearing", mining: "surface_disturbance" };
+  const LEGACY_NAMES = {
+    forest_clearing: { name: "Forest clearing", short: "ForestCheck" },
+    surface_disturbance: { name: "Mining & earthworks", short: "MineWatch" },
+  };
+  const AUTO_DESC = "The agent reads the claim and picks the most suitable indicator. If none fits, it falls back to general surface change.";
+
+  function normIndicatorId(id) {
+    if (typeof id !== "string" || !id) return null;
+    return LEGACY_MODES[id] || id;
+  }
+  function findIndicator(id) {
+    const nid = normIndicatorId(id);
+    return nid ? state.indicators.find((x) => x.id === nid) || null : null;
+  }
+  // Display label for an indicator id. kind: "short" (compact lists) or "name" (full).
+  function indicatorLabel(id, kind) {
+    if (id === "auto") return "Auto-detect";
+    const nid = normIndicatorId(id);
+    if (!nid) return "";
+    const ind = findIndicator(nid) || LEGACY_NAMES[nid];
+    if (!ind) return String(id);
+    return kind === "short" ? (ind.short || ind.name || nid) : (ind.name || ind.short || nid);
+  }
+  function caseIndicator(c) { return normIndicatorId(c.indicator || c.mode); }
+
+  async function loadIndicators() {
+    try {
+      const list = await api("/indicators");
+      state.indicators = Array.isArray(list) ? list.filter((x) => x && typeof x.id === "string" && x.id) : [];
+      state.indicatorsError = null;
+    } catch (e) {
+      state.indicators = [];
+      state.indicatorsError = e.message || "unavailable";
+    }
+    if (state.indicator !== "auto" && !findIndicator(state.indicator)) state.indicator = "auto";
+    renderPicker();
+  }
+
+  function renderPicker() {
+    const box = clear($("indicator-picker"));
+    const opts = [{ id: "auto", name: "Auto-detect from claim", short: "Auto", auto: true }].concat(state.indicators);
+    for (const ind of opts) {
+      const on = ind.id === state.indicator;
+      const btn = el("button", {
+        type: "button", role: "radio", "aria-checked": on ? "true" : "false",
+        class: "ind-opt" + (ind.auto ? " auto" : "") + (ind.is_fallback ? " fallback" : "") + (on ? " active" : ""),
+        title: ind.auto ? AUTO_DESC : (ind.description || ind.name || ind.id),
+        on: { click: () => setIndicator(ind.id) },
+      },
+        el("span", { class: "ind-name", text: ind.auto ? ind.name : (ind.name || ind.id) }),
+        !ind.auto && ind.short && ind.short !== ind.name ? el("span", { class: "ind-short", text: ind.short }) : null,
+        ind.is_fallback ? el("span", { class: "ind-short", text: "fallback" }) : null);
+      btn.dataset.id = ind.id;
+      box.appendChild(btn);
+    }
+    renderIndicatorInfo();
     fillCaseSelect();
   }
 
+  function setIndicator(id) {
+    state.indicator = id;
+    document.querySelectorAll(".ind-opt").forEach((b) => {
+      const on = b.dataset.id === id;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-checked", on ? "true" : "false");
+    });
+    renderIndicatorInfo();
+    fillCaseSelect();
+  }
+
+  function renderIndicatorInfo() {
+    const box = clear($("indicator-info"));
+    let desc, examples, meta = null;
+    if (state.indicator === "auto") {
+      desc = AUTO_DESC;
+      examples = [];
+      for (const ind of state.indicators) {
+        if (ind.is_fallback || !Array.isArray(ind.example_claims) || !ind.example_claims.length) continue;
+        examples.push(ind.example_claims[0]);
+        if (examples.length >= 4) break;
+      }
+    } else {
+      const ind = findIndicator(state.indicator) || {};
+      desc = ind.description || "";
+      examples = Array.isArray(ind.example_claims) ? ind.example_claims : [];
+      const bits = [];
+      if (ind.evidence_label) bits.push("Evidence: " + ind.evidence_label);
+      if (Array.isArray(ind.directions) && ind.directions.length) bits.push("Directions: " + ind.directions.join(", "));
+      if (bits.length) meta = el("div", { class: "ind-meta", text: bits.join(" · ") });
+      if (ind.is_fallback) box.appendChild(el("div", { class: "ind-fallback-note", text: "Fallback indicator: verdicts on this basis can only be supported or inconclusive." }));
+    }
+    if (desc) box.appendChild(el("div", { class: "ind-desc", text: desc }));
+    if (meta) box.appendChild(meta);
+    if (state.indicatorsError) box.appendChild(el("div", { class: "ind-meta", text: "Indicator list unavailable (" + state.indicatorsError + ") — auto-detect still works." }));
+    const ex = examples.filter((t) => typeof t === "string" && t.trim());
+    if (ex.length) {
+      box.appendChild(el("div", { class: "ind-ex-label", text: "Example claims" }));
+      box.appendChild(el("div", { class: "ex-chips" }, ex.map((t) => el("button", {
+        type: "button", class: "ex-chip", title: "Use this claim",
+        on: { click: () => { const ta = $("claim"); ta.value = t; ta.focus(); } },
+      }, t))));
+    }
+  }
+
+  // ---------------------------------------------------------------- form
   function fillCaseSelect() {
     const sel = $("case-select");
+    const prev = sel.value;
     clear(sel);
-    const cases = state.cases.filter((c) => c.mode === state.mode);
+    const auto = state.indicator === "auto";
+    const cases = auto ? state.cases.slice() : state.cases.filter((c) => caseIndicator(c) === state.indicator);
     if (!cases.length) {
-      sel.appendChild(el("option", { value: "", text: state.cases.length ? "No demo cases for this mode" : "No demo cases available" }));
+      sel.appendChild(el("option", { value: "", text: state.cases.length ? "No demo cases for this indicator" : "No demo cases available" }));
+    } else if (auto) {
+      // optgroups by indicator, in /indicators order, unknown ones last
+      const order = state.indicators.map((x) => x.id);
+      const groups = new Map();
+      for (const c of cases) {
+        const k = caseIndicator(c) || "";
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(c);
+      }
+      const keys = Array.from(groups.keys()).sort((x, y) => {
+        const ix = order.indexOf(x), iy = order.indexOf(y);
+        return (ix < 0 ? 1e6 : ix) - (iy < 0 ? 1e6 : iy);
+      });
+      for (const k of keys) {
+        const ind = findIndicator(k) || LEGACY_NAMES[k];
+        const label = k ? (ind ? (ind.short && ind.name && ind.short !== ind.name ? ind.short + " — " + ind.name : (ind.name || ind.short)) : k) : "Other";
+        const g = el("optgroup", { label: label });
+        for (const c of groups.get(k)) g.appendChild(el("option", { value: c.id, text: c.name || c.id }));
+        sel.appendChild(g);
+      }
     } else {
       for (const c of cases) sel.appendChild(el("option", { value: c.id, text: c.name || c.id }));
     }
     sel.appendChild(el("option", { value: "", text: "— none (custom location) —" }));
-    onCaseChange();
+    if (prev && cases.some((c) => c.id === prev)) sel.value = prev;
+    onCaseChange(sel.value !== state.lastCaseId);
   }
 
-  function onCaseChange() {
+  function onCaseChange(fillClaim) {
     const sel = $("case-select");
     const info = $("case-info");
     const c = state.cases.find((x) => x.id === sel.value);
+    state.lastCaseId = sel.value;
     clear(info);
     if (!c) {
       info.hidden = true;
-      if (!sel.value) $("custom-loc").open = true;
+      if (!sel.value && state.casesLoaded) $("custom-loc").open = true;
       return;
     }
-    $("claim").value = c.default_claim || "";
+    if (fillClaim !== false) $("claim").value = c.default_claim || "";
+    const ci = caseIndicator(c);
+    if (ci) info.appendChild(el("div", { class: "case-ind", text: indicatorLabel(ci, "name") }));
     if (c.description) info.appendChild(el("div", { text: c.description }));
     info.appendChild(el("div", { class: "loc", text:
       fmtNum(c.latitude, 4) + ", " + fmtNum(c.longitude, 4) + " · " + fmtNum(c.width_km, 1) + " km · " +
       (c.before_date || "?") + " → " + (c.after_date || "?") }));
+    if (c.location_source) info.appendChild(el("div", { class: "loc", text: "Location source: " + c.location_source }));
     info.hidden = false;
-    // Prefill custom fields with the case so the user can tweak them.
-    $("c-lat").value = c.latitude ?? "";
-    $("c-lon").value = c.longitude ?? "";
-    $("c-width").value = c.width_km ?? "";
-    $("c-before").value = c.before_date || "";
-    $("c-after").value = c.after_date || "";
+    if (fillClaim !== false) {
+      // Prefill custom fields with the case so the user can tweak them.
+      $("c-lat").value = c.latitude ?? "";
+      $("c-lon").value = c.longitude ?? "";
+      $("c-width").value = c.width_km ?? "";
+      $("c-before").value = c.before_date || "";
+      $("c-after").value = c.after_date || "";
+    }
   }
 
   async function loadCases() {
@@ -212,6 +348,7 @@
       state.cases = [];
       showErrorBox($("form-error"), e.info || { code: "ERROR", message: e.message });
     }
+    state.casesLoaded = true;
     fillCaseSelect();
   }
 
@@ -222,7 +359,7 @@
     errBox.hidden = true;
 
     const claim = $("claim").value.trim();
-    const body = { mode: state.mode, claim: claim };
+    const body = { claim: claim, indicator: state.indicator || "auto" };
     const caseId = $("case-select").value;
     const customOpen = $("custom-loc").open;
     const caseObj = state.cases.find((x) => x.id === caseId);
@@ -273,6 +410,16 @@
   }
 
   // ---------------------------------------------------------------- recent
+  function recentIndicator(it) {
+    const resolved = normIndicatorId(it.indicator) || (it.requested_indicator && it.requested_indicator !== "auto" ? normIndicatorId(it.requested_indicator) : null) || normIndicatorId(it.mode);
+    const auto = it.requested_indicator === "auto";
+    let text;
+    if (resolved) text = indicatorLabel(resolved, "short") + (auto ? " (auto)" : "");
+    else text = auto ? "Auto" : "";
+    const ind = findIndicator(resolved);
+    return el("span", { class: "recent-ind" + (ind && ind.is_fallback ? " fallback" : ""), title: resolved ? indicatorLabel(resolved, "name") : "", text: text });
+  }
+
   async function loadRecent() {
     const list = $("recent-list");
     let items;
@@ -295,7 +442,7 @@
       },
         el("span", { class: "recent-claim", text: it.claim || it.investigation_id }),
         el("span", { class: "recent-meta" },
-          el("span", { text: it.mode === "forest" ? "ForestCheck" : it.mode === "mining" ? "MineWatch" : (it.mode || "") }),
+          recentIndicator(it),
           el("span", { class: "chip s-" + (it.status || ""), text: it.status || "?" }),
           v ? el("span", { class: "chip v-" + v, text: v }) : null,
           el("span", { text: fmtTime(it.created_at) })));
@@ -313,6 +460,9 @@
     state.pollGen += 1;
     if (state.pollTimer) clearTimeout(state.pollTimer);
     state.currentId = id;
+    if (location.hash !== "#inv=" + encodeURIComponent(id)) {
+      try { history.replaceState(null, "", "#inv=" + encodeURIComponent(id)); } catch (_) { /* ignore */ }
+    }
     state.last = null;
     state.view = null;
     $("empty-state").hidden = true;
@@ -403,13 +553,66 @@
       v.imageryKey = imgKey;
       renderImagery(v, d);
     }
+    updateLegends(v, d);
 
-    const resKey = JSON.stringify([d.verdict, d.headline, d.measurements, d.visual_analysis, d.methodology, d.sources, d.limitations]);
+    const resKey = JSON.stringify([d.verdict, d.headline, d.measurements, d.indicator_info, d.visual_analysis, d.methodology, d.sources, d.limitations]);
     if (resKey !== v.resultsKey) {
       v.resultsKey = resKey;
       renderVerdict(v, d);
       renderResults(v, d);
     }
+  }
+
+  // Resolve requested/resolved indicator info for an investigation (handles legacy "mode" payloads).
+  function indicatorState(d) {
+    const legacy = normIndicatorId(d.mode);
+    const requested = typeof d.requested_indicator === "string" && d.requested_indicator ? d.requested_indicator : (legacy || "auto");
+    const info = d.indicator_info && typeof d.indicator_info === "object" ? d.indicator_info : null;
+    const resolved = normIndicatorId(d.indicator) || (info && info.id) || (d.requested_indicator === undefined ? legacy : null);
+    const known = findIndicator(resolved);
+    const name = (info && (info.name || info.short)) || (resolved ? indicatorLabel(resolved, "name") : "");
+    const isFallback = info ? !!info.is_fallback : !!(known && known.is_fallback);
+    const evidenceLabel = (info && info.evidence_label) || (known && known.evidence_label) || "";
+    return { requested, resolved, name, isFallback, evidenceLabel };
+  }
+
+  function renderIndicatorBlock(d) {
+    const st = indicatorState(d);
+    const wrap = el("div", { class: "ind-block" });
+    let how = "";
+    if (st.resolved && d.requested_indicator !== undefined) {
+      if (st.requested === "auto") how = "auto-detected";
+      else if (normIndicatorId(st.requested) !== st.resolved) how = "requested " + indicatorLabel(st.requested, "name");
+      else how = "selected";
+    }
+    const line = el("div", { class: "ind-line" }, el("span", { class: "ind-k", text: "Indicator" }));
+    if (st.resolved) {
+      line.appendChild(el("span", { class: "ind-v" + (st.isFallback ? " fallback" : ""), text: st.name || st.resolved }));
+      if (how) line.appendChild(el("span", { class: "chip", text: how }));
+    } else if (TERMINAL.has(d.status)) {
+      line.appendChild(el("span", { class: "muted", text: st.requested === "auto" ? "not determined" : indicatorLabel(st.requested, "name") }));
+    } else {
+      line.appendChild(el("span", { class: "muted" }, el("span", { class: "spinner inline" }),
+        st.requested === "auto" ? " auto-detecting from claim…" : " " + indicatorLabel(st.requested, "name") + " (interpreting claim…)"));
+    }
+    wrap.appendChild(line);
+
+    const ci = d.claim_interpretation && typeof d.claim_interpretation === "object" ? d.claim_interpretation : null;
+    if (ci) {
+      const facts = el("div", { class: "interp" });
+      const add = (k, val) => { if (val !== null && val !== undefined && val !== "") facts.appendChild(el("span", { class: "interp-item" }, el("span", { class: "ind-k", text: k }), String(val))); };
+      add("Asserts", ci.asserts === "no_change" ? "no change" : ci.asserts === "change" ? "change" : ci.asserts);
+      add("Direction", ci.direction);
+      add("Target", ci.observable_target);
+      add("Year", ci.referenced_year);
+      if (facts.children.length) wrap.appendChild(facts);
+      if (ci.explanation) wrap.appendChild(el("div", { class: "interp-expl", text: ci.explanation }));
+      if (ci.override) wrap.appendChild(el("div", { class: "note warn", text: "Indicator override: " + ci.override }));
+    }
+    if (st.isFallback) {
+      wrap.appendChild(el("div", { class: "note warn", text: "No specific indicator matched this claim — showing general surface change. The verdict can only be supported/inconclusive on this basis." }));
+    }
+    return wrap;
   }
 
   function renderHeader(v, d) {
@@ -424,11 +627,11 @@
       el("div", null,
         el("div", { class: "inv-claim", text: d.claim || "(no claim text)" }),
         el("div", { class: "inv-meta" },
-          el("span", { text: d.mode === "forest" ? "ForestCheck" : d.mode === "mining" ? "MineWatch" : (d.mode || "") }),
           loc ? el("span", { text: (loc.name ? loc.name + " · " : "") + fmtNum(loc.latitude, 4) + ", " + fmtNum(loc.longitude, 4) + " · " + fmtNum(loc.width_km, 1) + " km" }) : null,
           ts ? el("span", { text: "Before ≈ " + (ts.before_target || "?") + " · After ≈ " + (ts.after_target || "?") }) : null,
           el("span", { class: "mono", text: d.investigation_id }))),
       el("div", { class: "inv-actions" }, el("span", { class: "chip s-" + status, text: status }), dl)));
+    v.header.appendChild(renderIndicatorBlock(d));
 
     v.header.appendChild(el("div", { style: "margin-top:12px" },
       el("div", { class: "progress-row" },
@@ -522,6 +725,36 @@
   }
 
   // ---------------------------------------------------------------- imagery
+  const LEGEND_COLORS = { red: "#ff3b30", amber: "#ffb000", orange: "#ff8c00", yellow: "#ffd60a", green: "#30d158", blue: "#0a84ff", cyan: "#38d6e8", magenta: "#ff2bd6", purple: "#bf5af2" };
+
+  function overlayLegend(d) {
+    const m = d && d.measurements;
+    const lg = m && m.overlay_legend;
+    if (!lg || typeof lg !== "object" || Array.isArray(lg)) return [];
+    const out = [];
+    for (const [color, meaning] of Object.entries(lg)) {
+      if (meaning === null || meaning === undefined || meaning === "") continue;
+      const css = LEGEND_COLORS[color] || (/^[a-z]+$/.test(color) ? color : null);
+      out.push({ color: color, css: css, text: String(meaning) });
+    }
+    return out;
+  }
+
+  function fillLegend(node, d) {
+    clear(node);
+    const items = overlayLegend(d);
+    node.hidden = !items.length;
+    for (const it of items) {
+      const sw = el("span", { class: "swatch", title: it.color });
+      if (it.css) sw.style.background = it.css;
+      node.appendChild(el("span", { class: "legend-item" }, sw, it.text));
+    }
+  }
+
+  function updateLegends(v, d) {
+    v.imagery.querySelectorAll(".overlay-legend").forEach((n) => fillLegend(n, d));
+  }
+
   function renderImagery(v, d) {
     const box = clear(v.imagery);
     const img = d.imagery;
@@ -556,8 +789,10 @@
       const vw = views.find((x) => x.key === key);
       const im = el("img", { src: safeUrl(vw.url), alt: vw.label, loading: "lazy" });
       im.addEventListener("error", () => im.replaceWith(el("div", { class: "img-missing", text: "Image could not be loaded: " + vw.url })));
+      const legend = vw.key === "overlay" ? el("div", { class: "overlay-legend" }) : null;
+      if (legend) fillLegend(legend, state.last);
       stage.appendChild(el("div", { class: "gallery-view" + (crisp.on ? " crisp" : "") }, im,
-        el("div", { class: "gallery-caption", text: vw.label })));
+        el("div", { class: "gallery-caption", text: vw.label }), legend));
     }
     show("compare");
   }
@@ -619,6 +854,7 @@
       const cb = el("input", { type: "checkbox" });
       cb.addEventListener("change", () => { imMask.hidden = !cb.checked; });
       controls.appendChild(el("label", null, cb, "Show change mask"));
+      controls.appendChild(el("span", { class: "overlay-legend", hidden: true }));
     } else {
       controls.appendChild(el("span", { class: "muted", text: "No change mask available" }));
     }
@@ -661,11 +897,11 @@
     return typeof val === "number" && isFinite(val) && (/_ha$/.test(k) || /fraction/.test(k));
   }
 
-  function measurementCard(k, val) {
+  function measurementCard(k, val, labelOverride) {
     let txt, unit = "";
     if (/fraction/.test(k)) { txt = fmtNum(val * 100, 1); unit = "%"; }
     else { txt = fmtNum(val); unit = "ha"; }
-    const label = humanize(k.replace(/_ha$/, "").replace(/_fraction$/, ""));
+    const label = labelOverride || humanize(k.replace(/_ha$/, "").replace(/_fraction$/, ""));
     return el("div", { class: "card", title: k }, el("div", { class: "k", text: label }), el("div", { class: "v" }, txt, el("span", { class: "u", text: unit })));
   }
 
@@ -683,6 +919,7 @@
     const R = clear(v.results);
     const vd = d.verdict;
     const m = d.measurements && typeof d.measurements === "object" ? d.measurements : null;
+    const evLabel = indicatorState(d).evidenceLabel;
 
     // headline + key measurements
     const cards = el("div", { class: "cards" });
@@ -695,7 +932,13 @@
     const rest = {};
     if (m) {
       for (const [k, val] of Object.entries(m)) {
-        if (k === "regions" || k === "thresholds") continue;
+        if (k === "regions" || k === "thresholds" || k === "overlay_legend") continue;
+        if (/_regions$/.test(k) && Array.isArray(val)) continue;
+        if (k === "evidence_ha" && typeof val === "number" && isFinite(val)) {
+          // the headline usually *is* the evidence area — don't show it twice
+          if (!(d.headline && d.headline.value === val)) cards.appendChild(measurementCard(k, val, evLabel ? capFirst(evLabel) : "Evidence area"));
+          continue;
+        }
         if (isCardKey(k, val)) cards.appendChild(measurementCard(k, val));
         else rest[k] = val;
       }
@@ -726,7 +969,18 @@
     const row = el("div", { class: "grid-2" });
     if (d.visual_analysis) row.appendChild(renderVisual(d.visual_analysis));
     const regions = m && Array.isArray(m.regions) ? m.regions : null;
-    if (regions && regions.length) row.appendChild(renderRegions(regions));
+    const otherRegions = m ? Object.entries(m).filter(([k, val]) => k !== "regions" && /_regions$/.test(k) && Array.isArray(val) && val.length) : [];
+    if ((regions && regions.length) || otherRegions.length) {
+      const p = regions && regions.length
+        ? renderRegions(regions, (evLabel ? "Evidence regions · " + evLabel : "Evidence regions") + " (" + regions.length + ")", "Numbers match the labels on the change overlay.")
+        : panel("Evidence regions", el("div", { class: "muted", text: "No evidence regions." }));
+      for (const [k, val] of otherRegions) {
+        const sub = renderRegions(val, humanize(k) + " (" + val.length + ")");
+        p.appendChild(el("details", { class: "collapsible", style: "margin-top:10px" },
+          el("summary", { text: humanize(k) + " (" + val.length + ")" }), sub.lastChild));
+      }
+      row.appendChild(p);
+    }
     if (row.children.length) R.appendChild(row);
 
     // methodology + sources
@@ -780,40 +1034,58 @@
     return p;
   }
 
-  function renderRegions(regions) {
+  function renderRegions(regions, title, hint) {
     const skip = new Set(["id", "area_ha", "centroid_lonlat"]);
     const extraKeys = [];
     for (const r of regions) for (const k of Object.keys(r || {})) if (!skip.has(k) && !extraKeys.includes(k)) extraKeys.push(k);
-    const head = el("tr", null, el("th", { text: "ID" }), el("th", { class: "num", text: "Area (ha)" }), el("th", { class: "num", text: "Lat" }), el("th", { class: "num", text: "Lon" }),
+    const hasLL = regions.some((r) => r && Array.isArray(r.centroid_lonlat));
+    const head = el("tr", null, el("th", { text: "ID" }), el("th", { class: "num", text: "Area (ha)" }),
+      hasLL ? el("th", { class: "num", text: "Lat" }) : null, hasLL ? el("th", { class: "num", text: "Lon" }) : null,
       extraKeys.map((k) => el("th", { text: humanize(k) })));
     const rows = regions.map((r) => {
       const c = Array.isArray(r.centroid_lonlat) ? r.centroid_lonlat : [];
       return el("tr", null,
         el("td", { class: "mono", text: r.id ?? "" }),
         el("td", { class: "num", text: typeof r.area_ha === "number" ? fmtNum(r.area_ha, 1) : fmtValue(r.area_ha) }),
-        el("td", { class: "num", text: typeof c[1] === "number" ? c[1].toFixed(4) : "—" }),
-        el("td", { class: "num", text: typeof c[0] === "number" ? c[0].toFixed(4) : "—" }),
+        hasLL ? el("td", { class: "num", text: typeof c[1] === "number" ? c[1].toFixed(4) : "—" }) : null,
+        hasLL ? el("td", { class: "num", text: typeof c[0] === "number" ? c[0].toFixed(4) : "—" }) : null,
         extraKeys.map((k) => {
           const val = r[k];
           return el("td", { text: Array.isArray(val) ? val.map(fmtValue).join(", ") : fmtValue(val) });
         }));
     });
-    return panel("Change regions (" + regions.length + ")",
+    return panel(title || "Change regions (" + regions.length + ")",
+      hint ? el("div", { class: "hint", text: hint }) : null,
       el("div", { style: "overflow-x:auto" }, el("table", { class: "data" }, el("thead", null, head), el("tbody", null, rows))));
   }
 
   // ---------------------------------------------------------------- init
   function init() {
-    document.querySelectorAll(".mode-card").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
-    $("case-select").addEventListener("change", onCaseChange);
+    $("case-select").addEventListener("change", () => onCaseChange(true));
     $("inv-form").addEventListener("submit", onSubmit);
     $("refresh-recent").addEventListener("click", loadRecent);
     loadHealth();
     setInterval(loadHealth, 30000);
+    renderPicker();
     loadCases();
-    loadRecent();
+    // Indicator names are needed by the recent list and the investigation header:
+    // load them first, then (re)render whatever depends on them.
+    loadIndicators().then(() => {
+      loadRecent();
+      if (state.view && state.last) {
+        try { state.view.resultsKey = undefined; render(state.last); } catch (err) { console.error(err); }
+      }
+    });
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+  }
+
+  function openFromHash() {
     const m = /^#inv=(.+)$/.exec(location.hash);
-    if (m) openInvestigation(decodeURIComponent(m[1]));
+    if (!m) return;
+    let id;
+    try { id = decodeURIComponent(m[1]); } catch (_) { return; }
+    if (id && id !== state.currentId) openInvestigation(id);
   }
 
   document.addEventListener("DOMContentLoaded", init);

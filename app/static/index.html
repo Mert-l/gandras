@@ -24,16 +24,11 @@
     <aside class="sidebar">
       <section class="panel">
         <h2 class="panel-title">New investigation</h2>
-        <div class="mode-tabs" role="tablist" aria-label="Investigation mode">
-          <button type="button" class="mode-card active" role="tab" aria-selected="true" data-mode="mining">
-            <span class="mode-name">MineWatch</span>
-            <span class="mode-desc">Mining expansion</span>
-          </button>
-          <button type="button" class="mode-card" role="tab" aria-selected="false" data-mode="forest">
-            <span class="mode-name">ForestCheck</span>
-            <span class="mode-desc">Forest clearing</span>
-          </button>
+        <div class="field">
+          <span class="label" id="indicator-label">Indicator</span>
+          <div id="indicator-picker" class="indicator-picker" role="radiogroup" aria-labelledby="indicator-label"></div>
         </div>
+        <div id="indicator-info" class="indicator-info"></div>
 
         <form id="inv-form" novalidate>
           <label class="field">
@@ -44,7 +39,7 @@
 
           <label class="field">
             <span class="label">Claim</span>
-            <textarea id="claim" rows="4" placeholder="e.g. The mine expanded significantly between 2019 and 2024."></textarea>
+            <textarea id="claim" rows="4" placeholder="e.g. A new warehouse complex was built here between 2019 and 2024."></textarea>
           </label>
 
           <details id="custom-loc" class="custom-loc">
@@ -78,7 +73,7 @@
       <div id="empty-state" class="empty-state">
         <div class="empty-globe" aria-hidden="true"></div>
         <h2>No investigation selected</h2>
-        <p>Pick a mode and a demo case, then press <strong>Investigate</strong>. Or open a recent investigation to replay its evidence.</p>
+        <p>Describe a claim, pick an indicator (or let the agent auto-detect one) and a demo case or custom location, then press <strong>Investigate</strong>. Or open a recent investigation to replay its evidence.</p>
       </div>
       <div id="investigation" hidden></div>
     </section>

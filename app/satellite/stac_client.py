@@ -11,7 +11,7 @@ from pystac_client import Client
 from app.config import get_settings
 from app.satellite import cache
 
-ASSET_KEYS = {"B02": "blue", "B03": "green", "B04": "red", "B08": "nir", "B11": "swir16", "SCL": "scl"}
+ASSET_KEYS = {"B02": "blue", "B03": "green", "B04": "red", "B08": "nir", "B11": "swir16", "B12": "swir22", "SCL": "scl"}
 
 
 class BandAsset(BaseModel):
@@ -62,7 +62,8 @@ def search_scenes(bbox: list[float], start: str, end: str, max_cloud: float | No
     s = get_settings()
     max_cloud = s.max_scene_cloud_percent if max_cloud is None else max_cloud
     params = {"url": s.stac_api_url, "collection": s.stac_collection, "bbox": [round(v, 6) for v in bbox],
-              "datetime": f"{start}/{end}", "max_cloud": max_cloud, "max_items": max_items}
+              "datetime": f"{start}/{end}", "max_cloud": max_cloud, "max_items": max_items,
+              "assets": sorted(ASSET_KEYS)}
     key = cache.key("stac_search", params)
     hit = cache.get_json(key)
     if hit is not None:

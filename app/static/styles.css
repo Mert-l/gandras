@@ -105,18 +105,59 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .panel-head { margin-bottom: 10px; }
 
 /* ---------- form ---------- */
-.mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-.mode-card {
-  text-align: left; cursor: pointer;
+.indicator-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ind-opt {
+  text-align: left; cursor: pointer; min-width: 0;
   background: var(--bg2); color: var(--text);
-  border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;
-  font: inherit;
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 9px; display: flex; flex-direction: column; gap: 1px;
+  font: inherit; font-size: 12.5px; line-height: 1.25;
 }
-.mode-card:hover { border-color: var(--line2); }
-.mode-card.active { border-color: var(--cyan); background: var(--cyan-dim); }
-.mode-name { font-weight: 600; font-size: 14px; }
-.mode-desc { font-size: 11.5px; color: var(--muted); }
+.ind-opt:hover { border-color: var(--line2); }
+.ind-opt:focus-visible { outline: 2px solid rgba(56, 214, 232, 0.5); outline-offset: 1px; }
+.ind-opt.active { border-color: var(--cyan); background: var(--cyan-dim); }
+.ind-opt.auto { grid-column: 1 / -1; }
+.ind-opt.auto .ind-name::before { content: "\2726  "; color: var(--cyan); }
+.ind-opt.fallback { border-style: dashed; color: var(--muted); }
+.ind-opt.fallback.active { color: var(--text); }
+.ind-name { font-weight: 600; overflow-wrap: anywhere; }
+.ind-short { font-size: 10.5px; color: var(--dim); letter-spacing: 0.04em; }
+.ind-opt.active .ind-short { color: var(--muted); }
+.indicator-info {
+  font-size: 12.5px; color: var(--muted); margin: -2px 0 12px;
+  border-left: 2px solid var(--line2); padding: 2px 0 2px 10px;
+}
+.indicator-info:empty { display: none; }
+.ind-desc { color: var(--text); opacity: 0.85; }
+.ind-meta { font-size: 11px; color: var(--dim); margin-top: 3px; }
+.ind-fallback-note { font-size: 11.5px; color: var(--amber); margin-bottom: 3px; }
+.ind-ex-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 7px 0 4px; }
+.ex-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.ex-chip {
+  background: #081326; color: var(--muted); border: 1px solid var(--line2); border-radius: 12px;
+  padding: 3px 9px; font: inherit; font-size: 11.5px; cursor: pointer; text-align: left; line-height: 1.3;
+}
+.ex-chip:hover { color: var(--cyan); border-color: var(--cyan); }
+.case-info .case-ind { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--cyan); margin-bottom: 2px; }
+
+/* investigation indicator block */
+.ind-block { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.ind-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.ind-k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); margin-right: 5px; }
+.ind-v { font-weight: 600; color: #eef6ff; }
+.ind-v.fallback { color: var(--amber); }
+.interp { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--text); }
+.interp-expl { font-size: 12px; color: var(--muted); }
+.spinner.inline { display: inline-block; width: 10px; height: 10px; vertical-align: -1px; }
+.note.warn { border-color: rgba(245, 177, 76, 0.5); background: rgba(245, 177, 76, 0.08); color: #ffd9a0; }
+.recent-ind.fallback { color: var(--amber); }
+
+/* overlay legend */
+.overlay-legend { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; color: var(--muted); }
+.gallery-view .overlay-legend { display: flex; margin-top: 6px; }
+.gallery-view .overlay-legend[hidden] { display: none !important; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.swatch { width: 11px; height: 11px; border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.35); background: var(--dim); flex: none; }
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
