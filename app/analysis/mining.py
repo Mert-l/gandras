@@ -109,7 +109,7 @@ def _pattern(r: dict) -> str:
     nb = r.get("mean_ndvi_before") or 0
     if nb >= 0.35 and dn < -0.15 and db > 0.03:
         return "vegetated_to_bare"
-    if nb < 0.25 and abs(dn) < 0.1:
+    if nb < 0.25 and nb + dn < 0.25:  # non-vegetated on both dates
         return "change_within_bare_ground"
     if dn > 0.15:
         return "vegetation_increase"
