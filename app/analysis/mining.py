@@ -99,7 +99,7 @@ def analyze_surface_disturbance(before: dict[str, np.ndarray], after: dict[str, 
         "excluded": ["SCL invalid on either date", "regions < min_region_ha"],
         "caveat": "Candidate surface disturbances, not classified excavation.",
     }
-    return {"result": result, "masks": {"change": kept, "valid": finite},
+    return {"result": result, "masks": {"change": kept, "evidence": kept, "valid": finite},
             "layers": {"magnitude": mag, "delta_bsi": d_bsi, "delta_ndvi": d_ndvi}}
 
 

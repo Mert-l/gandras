@@ -16,7 +16,8 @@ def build_sections(st) -> dict:
                             f"({a['regions_detected']} regions ≥ {a['thresholds']['min_region_ha']} ha).")
             observed.append(f"{a['forest_like_loss_ha']:.1f} ha of that loss was on pixels with forest-like canopy before "
                             f"(NDVI ≥ {a['thresholds']['forest_ndvi_min']}, SWIR < {a['thresholds']['forest_swir_max']}); "
-                            f"{a['probable_clearing_ha']:.1f} ha also showed a bare-soil-index increase.")
+                            f"{a['probable_clearing_ha']:.1f} ha in {a.get('clearing_regions_detected', 0)} regions also showed a bare-soil-index increase "
+                            "(red on the overlay; other vegetation loss in amber).")
             if a["probable_clearing_ha"] > 0:
                 inferred.append("Areas with all three indicators (canopy before, NDVI drop, bare soil after) are consistent with clearing.")
             if a["candidate_loss_ha"] - a["forest_like_loss_ha"] > 1:

@@ -14,10 +14,15 @@ def _save(arr: np.ndarray, path: Path) -> Path:
     return path
 
 
+AMBER = (255, 170, 0)
+
+
 def overlay(rgb: np.ndarray, change: np.ndarray, regions: list[dict], path: Path,
-            color=(255, 40, 40), label_top: int = 12) -> Path:
-    """Base RGB with change pixels tinted, region outlines and numbered labels."""
+            color=(255, 40, 40), label_top: int = 12, other: np.ndarray | None = None) -> Path:
+    """Base RGB with evidence pixels tinted red (outlined, numbered) and `other` change in amber."""
     out = rgb.copy()
+    if other is not None and other.any():
+        out[other] = (out[other] * 0.6 + np.array(AMBER) * 0.4).astype(np.uint8)
     out[change] = (out[change] * 0.45 + np.array(color) * 0.55).astype(np.uint8)
     cnts, _ = cv2.findContours(change.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cv2.drawContours(out, cnts, -1, (255, 230, 0), 1)
@@ -28,9 +33,12 @@ def overlay(rgb: np.ndarray, change: np.ndarray, regions: list[dict], path: Path
     return _save(out, path)
 
 
-def mask_rgba(change: np.ndarray, path: Path, color=(255, 40, 40), alpha: int = 150) -> Path:
-    """Transparent PNG of the change mask, to layer on top of RGB in the UI."""
+def mask_rgba(change: np.ndarray, path: Path, color=(255, 40, 40), alpha: int = 150,
+              other: np.ndarray | None = None) -> Path:
+    """Transparent PNG: evidence mask in red (yellow edges), optional other change in amber."""
     out = np.zeros((*change.shape, 4), np.uint8)
+    if other is not None:
+        out[other] = (*AMBER, 110)
     out[change] = (*color, alpha)
     edges = cv2.Canny(change.astype(np.uint8) * 255, 50, 150) > 0
     out[edges] = (255, 230, 0, 255)

@@ -5,11 +5,12 @@
     "mode": "mining",
     "default_claim": "The mining operation at this site stopped expanding after 2019.",
     "latitude": -20.985,
-    "longitude": -68.800,
+    "longitude": -68.8,
     "width_km": 6,
     "before_date": "2019-11-15",
     "after_date": "2023-11-15",
-    "description": "High-altitude open-pit copper operation in the Atacama. Pre-scouted with real Sentinel-2 L2A scenes (Nov 2019 vs Nov 2023, both cloud-free over the AOI); candidate surface disturbances appear around waste dumps, pit walls and a new linear feature."
+    "description": "High-altitude open-pit copper operation in the Atacama. Pre-scouted with real Sentinel-2 L2A scenes (Nov 2019 vs Nov 2023, both cloud-free over the AOI); candidate surface disturbances appear around waste dumps, pit walls and a new linear feature.",
+    "location_source": "Mine location per Wikipedia 'Quebrada Blanca' (−21.0043, −68.8010); AOI centre is ~2 km north, inside the 6 km AOI."
   },
   {
     "id": "mine_bingham_canyon",
@@ -17,34 +18,37 @@
     "mode": "mining",
     "default_claim": "The Bingham Canyon pit has not expanded since 2019.",
     "latitude": 40.523,
-    "longitude": -112.150,
+    "longitude": -112.15,
     "width_km": 5,
     "before_date": "2019-07-15",
     "after_date": "2024-07-15",
-    "description": "Large, long-established open pit. Summer 2019 vs summer 2024; real scenes show localised changes inside the existing pit and on its walls."
+    "description": "Large, long-established open pit. Summer 2019 vs summer 2024; real scenes show localised changes inside the existing pit and on its walls.",
+    "location_source": "Mine location per Wikipedia 'Bingham Canyon Mine' (40.523, −112.151)."
   },
   {
     "id": "forest_sw_amazon_frontier",
     "name": "Southwestern Amazon frontier site, Brazil (−9.54, −65.93)",
     "mode": "forest",
     "default_claim": "No forest was cleared in this area after 2020.",
-    "latitude": -9.540,
+    "latitude": -9.54,
     "longitude": -65.932,
     "width_km": 5,
     "before_date": "2020-07-22",
     "after_date": "2023-07-22",
-    "description": "Located by a 20 km wide scan of real dry-season imagery (Jul 2020 vs Jul 2023) for forest-like canopy loss. Mix of forest, pasture and newly bare ground."
+    "description": "Located by a 20 km wide scan of real dry-season imagery (Jul 2020 vs Jul 2023) for forest-like canopy loss. Mix of forest, pasture and newly bare ground.",
+    "location_source": "Coordinates chosen from imagery (no named site claimed)."
   },
   {
     "id": "forest_amazonas_control",
     "name": "Southern Amazonas forest control site, Brazil (−8.25, −66.95)",
     "mode": "forest",
     "default_claim": "This forest area has remained intact since 2020.",
-    "latitude": -8.250,
-    "longitude": -66.950,
+    "latitude": -8.25,
+    "longitude": -66.95,
     "width_km": 5,
     "before_date": "2020-07-25",
     "after_date": "2024-07-25",
-    "description": "Continuous canopy in the pre-scout (Jul 2020 vs Jul 2024): no candidate loss regions were found. Included as a control where a no-clearing claim can be tested."
+    "description": "Continuous canopy in the pre-scout (Jul 2020 vs Jul 2024): no candidate loss regions were found. Included as a control where a no-clearing claim can be tested.",
+    "location_source": "Coordinates chosen from imagery (no named site claimed)."
   }
 ]

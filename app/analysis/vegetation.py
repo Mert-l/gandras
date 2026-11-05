@@ -52,12 +52,15 @@ def analyze_vegetation_change(before: dict[str, np.ndarray], after: dict[str, np
     from app.analysis.mining import bsi  # local import avoids a cycle
     d_bsi = np.where(comp, bsi(after) - bsi(before), np.nan).astype(np.float32)
     forest_before = comp & (nb >= th.forest_ndvi_min) & (before["B11"] < th.forest_swir_max)
-    kept, regs = regions(clean_mask(raw, th.open_px), grid, th.min_region_ha,
-                         layers={"delta_ndvi": delta, "ndvi_before": nb, "ndvi_after": na,
-                                 "delta_bsi": d_bsi, "forest_before_frac": forest_before.astype(np.float32)})
+    layers = {"delta_ndvi": delta, "ndvi_before": nb, "ndvi_after": na,
+              "delta_bsi": d_bsi, "forest_before_frac": forest_before.astype(np.float32)}
+    kept, loss_regs = regions(clean_mask(raw, th.open_px), grid, th.min_region_ha, layers=layers)
     forest_loss = kept & forest_before
-    probable_clearing = forest_loss & (d_bsi > th.bare_bsi_rise_min)
-    for r in regs:
+    # Evidence mask: all three indicators at pixel level, then the same minimum-area filter, so the
+    # headline area, the overlay and the persistence check all use exactly these regions.
+    probable_clearing, clear_regs = regions(forest_loss & (d_bsi > th.bare_bsi_rise_min), grid,
+                                            th.min_region_ha, layers=layers)
+    for r in loss_regs + clear_regs:
         f = r.get("mean_forest_before_frac") or 0
         r["forest_like_before"] = f >= 0.5
         r["indicators"] = [n for n, ok in (("ndvi_drop", True), ("forest_like_before", f >= 0.5),
@@ -85,9 +88,11 @@ def analyze_vegetation_change(before: dict[str, np.ndarray], after: dict[str, np
         "forest_like_loss_fraction": round(safe_fraction(mask_area_ha(forest_loss, grid), mask_area_ha(forest_before, grid)) or 0.0, 5),
         "mean_ndvi_before": round(float(np.nanmean(np.where(comp, nb, np.nan))), 4) if comp.any() else None,
         "mean_ndvi_after": round(float(np.nanmean(np.where(comp, na, np.nan))), 4) if comp.any() else None,
-        "regions_detected": len(regs),
-        "regions": regs,
+        "regions_detected": len(loss_regs),
+        "clearing_regions_detected": len(clear_regs),
+        "regions": clear_regs,                 # evidence regions (probable clearing), numbered on the overlay
+        "vegetation_loss_regions": loss_regs,  # all candidate vegetation-loss regions
         "thresholds": th.model_dump(),
         "excluded": ["SCL invalid on either date", "water (SCL 6) on either date", "regions < min_region_ha"],
     }
-    return {"result": result, "masks": {"change": kept, "valid": comp, "forest_loss": forest_loss}, "layers": {"ndvi_before": nb, "ndvi_after": na, "delta": delta}}
+    return {"result": result, "masks": {"change": kept, "evidence": probable_clearing, "valid": comp, "forest_loss": forest_loss}, "layers": {"ndvi_before": nb, "ndvi_after": na, "delta": delta}}

@@ -106,8 +106,10 @@ def run_analysis(st: InvestigationState) -> tuple[str, dict]:
     rgb_b, rgb_a = render_rgb(B, stretch, vb, 1.4), render_rgb(A, stretch, va, 1.4)
     viz._save(rgb_b, out / "before.png")
     viz._save(rgb_a, out / "after.png")
-    viz.overlay(rgb_a, res["masks"]["change"], r["regions"], out / "overlay.png")
-    viz.mask_rgba(res["masks"]["change"], out / "mask.png")
+    evidence = res["masks"]["evidence"]
+    other = res["masks"]["change"] & ~evidence  # forest: vegetation loss that is not probable clearing
+    viz.overlay(rgb_a, evidence, r["regions"], out / "overlay.png", other=other)
+    viz.mask_rgba(evidence, out / "mask.png", other=other)
     extra = {}
     if st.mode == "forest":
         viz.ndvi_png(res["layers"]["ndvi_before"], out / "ndvi_before.png")
@@ -120,7 +122,9 @@ def run_analysis(st: InvestigationState) -> tuple[str, dict]:
         viz._save(viz._ramp(mag, [(0, (10, 10, 30)), (r["thresholds"]["magnitude_threshold_used"], (40, 160, 200)),
                                  (2 * r["thresholds"]["magnitude_threshold_used"], (255, 240, 120))]), out / "change_magnitude.png")
         extra = {"Bare-soil index change": "bsi_delta.png", "Spectral change magnitude": "change_magnitude.png"}
-    np.save(out / "change_mask.npy", res["masks"]["change"])
+    np.save(out / "change_mask.npy", evidence)  # the mask the verdict rests on; used for persistence
+    r["overlay_legend"] = ({"red": "probable clearing (evidence)", "amber": "other vegetation-index loss"}
+                           if st.mode == "forest" else {"red": "candidate surface disturbance"})
     r["stretch"] = stretch
     st.analysis = r
     st.methodology = {"analysis": r["method"], "thresholds": r["thresholds"], "grid": grid.model_dump(),
@@ -139,9 +143,10 @@ def run_analysis(st: InvestigationState) -> tuple[str, dict]:
     }
     if st.mode == "forest":
         summ = (f"Valid comparison area {r['valid_area_ha']:.0f} ha ({r['common_valid_pct']:.0f}% of AOI). "
-                f"Candidate vegetation loss {r['candidate_loss_ha']:.1f} ha in {r['regions_detected']} regions; "
-                f"of this, {r['forest_like_loss_ha']:.1f} ha was forest-like canopy before and "
-                f"{r['probable_clearing_ha']:.1f} ha also shows a bare-soil increase.")
+                f"Candidate vegetation loss {r['candidate_loss_ha']:.1f} ha in {r['regions_detected']} regions (amber); "
+                f"of this, {r['forest_like_loss_ha']:.1f} ha was forest-like canopy before, and "
+                f"{r['probable_clearing_ha']:.1f} ha in {r['clearing_regions_detected']} regions also shows a "
+                f"bare-soil increase (probable clearing, red).")
     else:
         summ = (f"Valid comparison area {r['valid_area_ha']:.0f} ha ({r['common_valid_pct']:.0f}% of AOI). "
                 f"Candidate surface disturbance {r['candidate_changed_area_ha']:.1f} ha in {r['regions_detected']} regions "
@@ -178,7 +183,7 @@ def corroborate(st: InvestigationState, window_days: int = 45) -> tuple[str, dic
     res = (analyze_vegetation_change if st.mode == "forest" else analyze_surface_disturbance)(B, A, both, grid)
     import cv2
     orig = np.load(asset_dir(st.investigation_id) / "change_mask.npy")
-    new = cv2.dilate(res["masks"]["change"].astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    new = cv2.dilate(res["masks"]["evidence"].astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     comparable = orig & both
     persist = float((comparable & new).sum()) / max(1, int(comparable.sum()))
     per_region = []
@@ -191,8 +196,10 @@ def corroborate(st: InvestigationState, window_days: int = 45) -> tuple[str, dic
            "persisting_fraction": round(persist, 3), "per_region": per_region,
            "compared": f"{b.acquired_at.date()} vs {third.acquired_at.date()}"}
     st.corroboration = out
+    what = "probable-clearing" if st.mode == "forest" else "detected change"
+    out["evidence_mask"] = what
     return (f"Independent observation {third.scene_id} ({third.acquired_at.date()}): {persist:.0%} of the originally "
-            f"detected change area is also detected against the before image."), out
+            f"{what} area is also detected against the before image."), out
 
 
 def cache_hit_rate() -> dict:

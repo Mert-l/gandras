@@ -13,7 +13,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/methodology.md](docs/
 
 | Case | Claim | Verdict | Key evidence |
 |---|---|---|---|
-| `forest_sw_amazon_frontier` | No forest was cleared after 2020 | contradicted · high | 147 ha probable clearing (of 550 ha vegetation loss); 94% persists |
+| `forest_sw_amazon_frontier` | No forest was cleared after 2020 | contradicted · high | 141 ha probable clearing in 23 regions (of 550 ha vegetation-index loss); 98% persists |
 | `forest_amazonas_control` | Forest intact since 2020 | supported · medium | 0 ha loss over 2,500 ha |
 | `mine_quebrada_blanca` | Stopped expanding after 2019 | contradicted · medium | 56.8 ha candidate disturbance; 86% persists |
 | `mine_bingham_canyon` | Not expanded since 2019 | inconclusive · medium | 68.9 ha change but only 45% persists |

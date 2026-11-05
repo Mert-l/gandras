@@ -213,7 +213,8 @@ class Runner:
         if res.get("status") != "ok":
             return f"Visual interpretation unavailable: {res.get('error')}. Continuing with measurements only.", {"status": "unavailable"}
         an = res["analysis"]
-        return (f"{res['model']}: {an['summary']} (consistency with measurements: {an['changes_consistent_with_measurements']})",
+        prefix = "(cached interpretation from an earlier run on the same scenes) " if res.get("cached") else ""
+        return (f"{prefix}{res['model']}: {an['summary']} (consistency with measurements: {an['changes_consistent_with_measurements']})",
                 {"observations": len(an["observations"]), "cached": res.get("cached", False)})
 
     def _evaluate(self):

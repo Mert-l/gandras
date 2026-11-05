@@ -27,8 +27,9 @@ All numbers come from Sentinel-2 L2A (`sentinel-2-c1-l2a`, Element 84 Earth Sear
   3×3 opening; regions < 0.5 ha removed.
 - **Forest-like before:** NDVI ≥ 0.70 and B11 < 0.18 (canopy is dark in SWIR; green pasture is not —
   measured at a test site at −9.35, −64.45, Jul 2020: forest NDVI 0.83/B11 0.13 vs pasture 0.58/0.25).
-- **Probable clearing** = candidate loss ∧ forest-like before ∧ BSI rise > 0.05. Only this is used
-  as evidence of clearing. Other vegetation loss is reported but treated as possibly pasture/crop/seasonal.
+- **Probable clearing** = candidate loss ∧ forest-like before ∧ BSI rise > 0.05, then the same
+  minimum-area filter. Only this is used as evidence of clearing: it is the headline area, the red
+  numbered regions on the overlay/mask, and the mask tested for persistence. Other vegetation loss is reported but treated as possibly pasture/crop/seasonal.
 
 ## MineWatch
 
@@ -43,7 +44,8 @@ All numbers come from Sentinel-2 L2A (`sentinel-2-c1-l2a`, Element 84 Earth Sear
 ## Corroboration
 
 An independent scene ≥ 15 days from the after scene is analysed against the same before scene.
-Persistence = share of originally detected change pixels (within the common valid area) detected
+Persistence = share of the evidence-mask pixels (probable clearing for ForestCheck, candidate
+disturbance for MineWatch) (within the common valid area) detected
 again (5×5 dilation for misregistration). ≥ 60% strong, < 30% weak.
 
 ## Verdict rules (`app/verification/evaluator.py`)
