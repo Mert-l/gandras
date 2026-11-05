@@ -622,7 +622,9 @@
     const status = d.status || "queued";
     const pct = Math.max(0, Math.min(100, Number(d.progress_percent) || (status === "completed" ? 100 : 0)));
 
-    const dl = el("button", { type: "button", class: "btn-ghost", on: { click: downloadReport } }, "Download JSON report");
+    const reportUrl = "/investigations/" + encodeURIComponent(d.investigation_id) + "/report";
+    const dl = el("a", { class: "btn-ghost", href: reportUrl + "?download=true" }, "Download evidence report");
+    const report = el("a", { class: "btn-ghost", href: reportUrl, target: "_blank", rel: "noopener" }, "Open evidence report");
     v.header.appendChild(el("div", { class: "inv-header" },
       el("div", null,
         el("div", { class: "inv-claim", text: d.claim || "(no claim text)" }),
@@ -630,7 +632,8 @@
           loc ? el("span", { text: (loc.name ? loc.name + " · " : "") + fmtNum(loc.latitude, 4) + ", " + fmtNum(loc.longitude, 4) + " · " + fmtNum(loc.width_km, 1) + " km" }) : null,
           ts ? el("span", { text: "Before ≈ " + (ts.before_target || "?") + " · After ≈ " + (ts.after_target || "?") }) : null,
           el("span", { class: "mono", text: d.investigation_id }))),
-      el("div", { class: "inv-actions" }, el("span", { class: "chip s-" + status, text: status }), dl)));
+      el("div", { class: "inv-actions" }, el("span", { class: "chip s-" + status, text: status }), report, dl,
+        el("button", { type: "button", class: "btn-ghost", on: { click: downloadReport } }, "Raw JSON"))));
     v.header.appendChild(renderIndicatorBlock(d));
 
     v.header.appendChild(el("div", { style: "margin-top:12px" },

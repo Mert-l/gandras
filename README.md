@@ -132,3 +132,15 @@ Errors: `{"error": {"code", "message"}}` — e.g. `INVALID_LOCATION`, `UNSUPPORT
 
 - Earth Search assets carry per-asset `scale`/`offset`; calibration always reads them.
 - Remote COG reads use the GDAL settings in `app/config.py` (`GDAL_COG_ENV`); ~46 s → ~2 s per window.
+
+## Evidence reports
+
+Open or download an evidence report from an investigation's action bar. The downloadable
+HTML embeds the satellite images and works offline, including clickable region findings
+that highlight their bounding boxes across before, after, and overlay imagery. The overlay
+shows detected pixels; boxes indicate the region extent. Reports include the original claim,
+verdict, metrics, acquisition timestamps, sources, methodology, and limitations. Use
+**Print / Save as PDF** for a static copy (interactive selection requires the HTML report).
+Raw JSON remains available separately. Incomplete investigations are labeled explicitly.
+
+`GET /investigations/{id}/report` opens the report; add `?download=true` to download it.

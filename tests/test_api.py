@@ -125,3 +125,31 @@ def test_create_with_auto_and_legacy_mode(monkeypatch):
     r = c.post("/investigations", json={"mode": "mining", "claim": "The pit stopped expanding", "case_id": "mine_bingham_canyon"})
     g = c.get(f"/investigations/{r.json()['investigation_id']}").json()
     assert g["requested_indicator"] == "surface_disturbance"
+
+
+def test_evidence_report_download(monkeypatch, tmp_path):
+    from app.verification.report import render_evidence_report
+    inv = 'inv_1234567890'
+    folder = tmp_path / inv
+    folder.mkdir()
+    (folder / 'before.png').write_bytes(b'png-test')
+    state = {'investigation_id': inv, 'claim': '</script><script>alert(1)</script>',
+             'status': 'completed', 'verdict': {'status': 'inconclusive'},
+             'imagery': {'before': {'url': f'/assets/{inv}/before.png'},
+                         'after': {'url': 'https://untrusted.example/image.png'}}}
+    html = render_evidence_report(state, tmp_path)
+    assert 'data:image/png;base64,cG5nLXRlc3Q=' in html
+    assert '</script><script>alert(1)</script>' not in html
+    assert 'https://untrusted.example' not in html
+    assert 'bbox_px' in html and 'aria-pressed' in html
+    monkeypatch.setattr('app.api.routes.database.load', lambda _: state)
+    monkeypatch.setattr('app.api.routes.ASSETS_ROOT', tmp_path)
+    client = TestClient(app)
+    response = client.get(f'/investigations/{inv}/report?download=true')
+    assert response.status_code == 200
+    assert 'text/html' in response.headers['content-type']
+    assert f'{inv}-evidence.html' in response.headers['content-disposition']
+    assert 'Content-Disposition' not in client.get(f'/investigations/{inv}/report').headers
+    assert client.get('/investigations/bad/report').status_code == 400
+    monkeypatch.setattr('app.api.routes.database.load', lambda _: None)
+    assert client.get(f'/investigations/{inv}/report').status_code == 404

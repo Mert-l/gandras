@@ -2,7 +2,7 @@ import asyncio
 import re
 
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 
 from app import database
 from app.agent.state import ASSETS_ROOT, load_demo_cases
@@ -81,3 +81,18 @@ def asset(inv_id: str, name: str):
     if ASSETS_ROOT.resolve() not in p.parents or not p.is_file():
         return err(404, "NOT_FOUND", "No such asset")
     return FileResponse(p, media_type="image/png")
+
+
+@router.get("/investigations/{inv_id}/report")
+def evidence_report(inv_id: str, download: bool = False):
+    from app.verification.report import render_evidence_report
+
+    if not INV_ID.fullmatch(inv_id):
+        return err(400, "INVALID_ID", "Malformed investigation id")
+    st = database.load(inv_id)
+    if st is None:
+        return err(404, "NOT_FOUND", "No such investigation")
+    headers = {"Cache-Control": "no-store"}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{inv_id}-evidence.html"'
+    return HTMLResponse(render_evidence_report(st, ASSETS_ROOT), headers=headers)

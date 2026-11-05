@@ -1,10 +1,9 @@
 """Assemble the observed / inferred / not-established report sections from real state."""
 from __future__ import annotations
 
-from app.indicators import get
-
-
 def build_sections(st) -> dict:
+    from app.indicators import get
+
     a = st.analysis or {}
     observed, inferred, not_est, lim = [], [], [], []
     ind = get(st.indicator) if st.indicator else None
@@ -38,3 +37,37 @@ def build_sections(st) -> dict:
     if gap:
         lim.append(gap)
     return {"observed": observed, "inferred": inferred, "not_established": not_est, "limitations": lim}
+
+
+def render_evidence_report(state: dict, assets_root) -> str:
+    """Portable report: embed only validated local investigation PNGs, never remote URLs."""
+    import base64
+    import json
+    import re
+    from pathlib import Path
+
+    inv = state['investigation_id']
+    if not re.fullmatch(r'inv_[0-9a-f]{10}', inv):
+        raise ValueError('Invalid investigation id')
+    payload = {k: state.get(k) for k in (
+        'investigation_id', 'claim', 'status', 'created_at', 'updated_at', 'location',
+        'temporal_scope', 'verdict', 'measurements', 'headline', 'methodology', 'sources',
+        'limitations', 'from_cache', 'error')}
+    imagery = state.get('imagery') or {}
+    payload['images'] = []
+    for role, meta in [('Before', imagery.get('before') or {}),
+                       ('After', imagery.get('after') or {}),
+                       ('Change overlay', {'url': imagery.get('overlay_url')})]:
+        url = meta.get('url') or ''
+        match = re.fullmatch(r'/assets/' + re.escape(inv) + r'/([a-z0-9_]{1,40}\.png)', url)
+        image = {k: meta[k] for k in ('scene_id', 'acquired_at', 'date') if k in meta}
+        image.update(role=role, data=None)
+        if match:
+            path = (Path(assets_root) / inv / match[1]).resolve()
+            if Path(assets_root).resolve() in path.parents and path.is_file():
+                image['data'] = 'data:image/png;base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
+        payload['images'].append(image)
+    # Escape HTML delimiters even inside JSON strings to prevent closing the script element.
+    data = json.dumps(payload, ensure_ascii=True).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+    template = Path(__file__).with_name('evidence_report.html').read_text(encoding='utf-8')
+    return template.replace('__REPORT_DATA__', data)

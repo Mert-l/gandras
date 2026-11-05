@@ -5,7 +5,6 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from app import database
-from app.agent.orchestrator import Runner
 from app.agent.state import InvestigationState, load_demo_cases, new_id
 
 log = logging.getLogger(__name__)
@@ -44,6 +43,16 @@ def _run(inv_id: str) -> None:
     if raw is None:
         return
     try:
+        # Keep the interface and saved reports available when native analysis
+        # dependencies cannot load on the host.
+        from app.agent.orchestrator import Runner
+
         Runner(InvestigationState.model_validate(raw)).run()
     except Exception:  # noqa: BLE001 - last-resort guard; Runner already records failures
         log.exception("runner crashed")
+        current = database.load(inv_id) or raw
+        if current.get("status") not in ("completed", "failed", "interrupted"):
+            current.update(status="failed", current_step=None,
+                           error={"code": "ANALYSIS_FAILED", "message":
+                                  "The analysis runtime could not start. Check the local server logs for dependency errors."})
+            database.save(current)
