@@ -52,7 +52,7 @@ def test_calibration_uses_metadata_and_nans_nodata():
 
 def test_scl_mask_and_quality():
     scl = np.array([[4, 5, 6, 8], [9, 10, 3, 0], [11, 1, 2, 7], [4, 4, 4, 4]], dtype=np.uint8)
-    m = valid_mask(scl)
+    m = valid_mask(scl, cloud_buffer_px=0)
     assert m.sum() == 9  # 4,5,6,2,7 + four 4s
     q = quality_stats(scl)
     assert q["cloud_pct"] == pytest.approx(300 / 16, abs=0.01)

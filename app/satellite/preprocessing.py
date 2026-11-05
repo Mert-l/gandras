@@ -14,8 +14,22 @@ INVALID_SCL = (0, 1, 3, 8, 9, 10, 11)
 CLOUD_SCL = (8, 9, 10)
 
 
-def valid_mask(scl: np.ndarray, invalid=INVALID_SCL) -> np.ndarray:
-    return ~np.isin(scl, invalid)
+CLOUD_AND_SHADOW_SCL = (3, 8, 9, 10)
+
+
+def valid_mask(scl: np.ndarray, invalid=INVALID_SCL, cloud_buffer_px: int = 5) -> np.ndarray:
+    """Valid = not an invalid SCL class and not within cloud_buffer_px of cloud/shadow.
+
+    The buffer catches cloud edges and shadow fringes that SCL commonly under-flags.
+    """
+    bad = np.isin(scl, invalid)
+    if cloud_buffer_px > 0:
+        import cv2
+        cs = np.isin(scl, CLOUD_AND_SHADOW_SCL).astype(np.uint8)
+        if cs.any():
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * cloud_buffer_px + 1,) * 2)
+            bad |= cv2.dilate(cs, k).astype(bool)
+    return ~bad
 
 
 def quality_stats(scl: np.ndarray, invalid=INVALID_SCL) -> dict:

@@ -47,8 +47,10 @@ def rank_scenes(scenes: list[SceneMeta], grid: AnalysisGrid, target: date,
         reason = ("local invalid {:.1f}% <= {:.0f}%" if usable else "local invalid {:.1f}% > {:.0f}%").format(
             q["invalid_pct"], max_invalid_pct)
         ranked.append(RankedScene(scene=s, quality=q, days_from_target=days, usable=usable, reason=reason))
-    ranked.sort(key=lambda r: (not r.usable, r.quality["invalid_pct"] > 5, abs(r.days_from_target),
-                               r.quality["invalid_pct"]))
+    # Tiered: usable first; then essentially cloud-free (<=1% invalid) scenes, because SCL
+    # under-flags shadows near clouds (seen at QB2, 2019-11-15); then date proximity.
+    ranked.sort(key=lambda r: (not r.usable, r.quality["invalid_pct"] > 1, r.quality["invalid_pct"] > 5,
+                               abs(r.days_from_target), r.quality["invalid_pct"]))
     return ranked
 
 
