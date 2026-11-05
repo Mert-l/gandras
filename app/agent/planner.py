@@ -52,8 +52,10 @@ def allowed_actions(st: InvestigationState, max_retries: int) -> list[str]:
     ea = st.evidence_assessment
     if ea is None or ea.get("stale"):
         acts.append("evaluate_evidence")
-    if ea is not None:
-        acts.append("finalize")  # finalize re-assesses all evidence, so a stale assessment is fine
+    if ea is not None and st.visual_analysis is not None:
+        # finalize re-assesses all evidence (stale assessment is fine) but requires that visual
+        # interpretation was at least attempted (it may have come back "unavailable").
+        acts.append("finalize")
     return acts
 
 
@@ -121,10 +123,9 @@ def llm_decision(st: InvestigationState, allowed: list[str], max_steps: int) -> 
         return None
     params = d.parameters or {}
     if d.action == "search_more_imagery":
-        role = params.get("role")
+        # The loop resolves observations in order, so the search always targets the first missing role.
         missing = [r for r in ("before", "after") if r not in st.selected_scenes]
-        if role not in ("before", "after") or (missing and role not in missing):
-            role = missing[0] if missing else "after"
+        role = missing[0] if missing else (params.get("role") if params.get("role") in ("before", "after") else "after")
         try:
             shift = max(-120, min(120, int(params.get("shift_days", 0))))
             window = max(15, min(90, int(params.get("window_days", 60))))
@@ -133,7 +134,7 @@ def llm_decision(st: InvestigationState, allowed: list[str], max_steps: int) -> 
         params = {"role": role, "shift_days": shift, "window_days": window}
     else:
         params = {}
-    reason = re.sub(r"\s+", " ", d.reason).strip()[:300] or "No reason given."
+    reason = re.sub(r"\s+", " ", d.reason).strip().strip("{}\"' ")[:300] or "No reason given."
     return d.action, reason, params
 
 

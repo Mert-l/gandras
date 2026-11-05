@@ -24,7 +24,7 @@ class VegetationThresholds(BaseModel):
     open_px: int = 1
     # Stricter "forest-like before" signal: dense canopy is high-NDVI and dark in SWIR, which
     # separates it from green pasture/crops (measured: forest NDVI~0.83/B11~0.13 vs pasture
-    # NDVI~0.58/B11~0.25 at Jaci-Parana, Jul 2020). Starting heuristic, not a land-cover product.
+    # NDVI~0.58/B11~0.25 at a test site at -9.35,-64.45, Jul 2020). Starting heuristic, not a land-cover product.
     forest_ndvi_min: float = 0.70
     forest_swir_max: float = 0.18
     bare_bsi_rise_min: float = 0.05

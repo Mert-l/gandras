@@ -7,7 +7,7 @@ Rules (documented in the report's methodology):
   bare-soil increase). General vegetation loss alone (e.g. pasture drying) is never treated as clearing.
 - MineWatch evidence = `candidate_changed_area_ha`. Surface change alone is not expansion: a
   "contradicted"/"supported-change" finding additionally needs corroboration that the change persists
-  (>= 60%) or a VLM reading consistent with the measurements. MineWatch confidence is capped at medium.
+  (>= 60%) in an independent observation; VLM agreement only adjusts confidence. MineWatch confidence is capped at medium.
 - Significant / negligible thresholds are configurable (EvidenceThresholds).
 - Confidence (low/medium/high) is a points tally, not a probability: data quality, seasonal match,
   corroboration, VLM agreement, margin above the significance threshold.
@@ -92,10 +92,12 @@ def verdict(mode: str, claim_type: str, analysis: dict | None, a: Assessment, vl
 
     big = a.change_level == "significant"
     small = a.change_level == "negligible"
-    persuasive = (a.corroborated is True) or (a.vlm_agrees is True) if mode == "mining" else True
+    # MineWatch: a measured persistence check is required; VLM agreement alone (model output that
+    # sees the untrusted claim) can raise confidence but never establish a contradiction.
+    persuasive = (a.corroborated is True) if mode == "mining" else True
     if mode == "mining" and big and not persuasive:
-        rationale.append("Significant surface change was measured, but neither persistence checks nor visual "
-                         "interpretation confirm it is expansion-related.")
+        rationale.append("Significant surface change was measured, but it was not confirmed to persist in an "
+                         "independent observation, so it cannot be treated as lasting expansion-related change.")
     if a.corroborated is False:
         rationale.append("Most detected change did not persist in an independent observation, so it may be transient.")
 

@@ -122,6 +122,14 @@ class Runner:
             ci, by = planner.interpret_claim_rules(st.mode, st.claim), "rule"
         elif ci.supported and ci.claim_type not in valid:
             ci, by = planner.interpret_claim_rules(st.mode, st.claim), "rule"
+        elif ci.supported:
+            # Claim polarity flips the verdict, and the claim is untrusted text: require the LLM's
+            # reading to agree with the deterministic one; otherwise use the deterministic reading.
+            rules = planner.interpret_claim_rules(st.mode, st.claim)
+            if rules.claim_type != ci.claim_type:
+                override = (f"LLM read the claim as '{ci.claim_type}' but keyword rules read '{rules.claim_type}'; "
+                            "using the deterministic reading.")
+                ci, by = rules, "rule"
         step.decided_by = by
         d = ci.model_dump()
         if override:
@@ -138,7 +146,8 @@ class Runner:
             st.current_step = None
             self._save()
             return False
-        self._end(step, f"Claim type '{ci.claim_type}': looking for {ci.observable_target} between "
+        note = f" Note: {override}" if override else ""
+        self._end(step, f"Claim type '{ci.claim_type}'{note}: looking for {ci.observable_target} between "
                         f"{st.temporal_scope['before_target']} and {st.temporal_scope['after_target']}.", d)
         return True
 

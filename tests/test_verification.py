@@ -34,6 +34,11 @@ def test_mining_change_without_support_is_inconclusive():
     assert v["status"] == "inconclusive"
 
 
+def test_mining_vlm_alone_not_enough():
+    vlm = {"status": "ok", "analysis": {"changes_consistent_with_measurements": "yes"}}
+    assert _v("mining", "no_expansion", _a("mining", ha=60), None, vlm)["status"] == "inconclusive"
+
+
 def test_mining_confidence_capped_at_medium():
     vlm = {"status": "ok", "analysis": {"changes_consistent_with_measurements": "yes"}}
     v = _v("mining", "no_expansion", _a("mining", ha=60), {"found": True, "persisting_fraction": 0.9}, vlm)

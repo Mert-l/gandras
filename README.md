@@ -1,13 +1,22 @@
 # The Earth Has Receipts
 
-Agentic AI that verifies real-world claims (MineWatch, ForestCheck) against real Sentinel-2 imagery.
+An agentic AI investigator that checks claims about the physical world — mine expansion
+(**MineWatch**) and forest clearing (**ForestCheck**) — against real Sentinel-2 imagery.
 
-## Status
+The agent decides what to investigate, geospatial code measures, a local Qwen vision model
+interprets, and a rule-based verification engine decides what the evidence supports. Reports
+separate what was **observed** from what is **inferred** and what is **not established**.
 
-- **Phase 1 done:** FastAPI backend with a live `/health` check (Ollama + Earth Search), environment checks.
-- **Phase 2 done:** real Sentinel-2 retrieval — STAC search, per-AOI SCL quality ranking, calibrated bands reprojected onto one common 10 m UTM grid, consistent RGB previews, caching.
+See [docs/architecture.md](docs/architecture.md) and [docs/methodology.md](docs/methodology.md).
 
-Not built yet: change detection, VLM, agent, full UI.
+## Demo cases (all real imagery, results from the cached runs)
+
+| Case | Claim | Verdict | Key evidence |
+|---|---|---|---|
+| `forest_sw_amazon_frontier` | No forest was cleared after 2020 | contradicted · high | 147 ha probable clearing (of 550 ha vegetation loss); 94% persists |
+| `forest_amazonas_control` | Forest intact since 2020 | supported · medium | 0 ha loss over 2,500 ha |
+| `mine_quebrada_blanca` | Stopped expanding after 2019 | contradicted · medium | 56.8 ha candidate disturbance; 86% persists |
+| `mine_bingham_canyon` | Not expanded since 2019 | inconclusive · medium | 68.9 ha change but only 45% persists |
 
 ## Setup
 
@@ -19,26 +28,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ollama pull qwen3.5:4b
+python scripts/check_environment.py
 ```
 
-## Check the environment
+## Pre-warm the demo cache (before presenting)
 
 ```bash
-python scripts/check_environment.py        # Ollama model + Earth Search collection
-python scripts/test_satellite_access.py    # real STAC search, prints band assets + scale/offset
+python scripts/prewarm_cache.py
 ```
 
-## Prepare a real before/after pair
-
-```bash
-python scripts/prepare_pair.py --name bingham --lat 40.523 --lon -112.150 --width-km 5 \
-    --before 2019-07-15 --after 2024-07-15
-```
-
-Searches ±45 days around each date, ranks scenes by **local** SCL quality over the AOI,
-and writes `before.png`, `after.png`, `side_by_side.png` and `metadata.json`
-(scene IDs, acquisition times, calibration, quality) to `data/investigations/pairs/<name>/`.
-First run ~90 s (network); reruns hit the cache.
+Runs all four demo cases once (~2 min first time). Afterwards they replay from cache in
+~10 s each and are marked "Replayed from cache" in the UI. Cached data are the same real scenes.
 
 ## Run
 
@@ -48,7 +48,8 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 - App: http://localhost:8000
 - API docs: http://localhost:8000/docs
-- Health: http://localhost:8000/health
+
+Use a single worker (the default); investigations run in one background thread.
 
 ## Test
 
@@ -56,11 +57,49 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 pytest -q
 ```
 
+Live VLM test (needs Ollama): `RUN_LIVE_VLM=1 pytest -q tests/test_vlm.py`.
+
+## Useful scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/check_environment.py` | Ollama model + Earth Search collection reachable |
+| `scripts/test_satellite_access.py` | Real STAC search; prints band assets and scale/offset |
+| `scripts/run_investigation.py CASE_ID ["claim"] [--no-llm]` | Run one investigation in the terminal |
+| `scripts/prepare_pair.py` | Render a before/after pair for any AOI |
+| `scripts/scout_site.py` / `scripts/scan_region.py` | How demo sites were found from data |
+
+## API
+
+| Method | Path | |
+|---|---|---|
+| GET | `/health` | live Ollama + STAC checks |
+| GET | `/demo-cases` | configured real cases |
+| POST | `/investigations` | `{mode, claim, case_id}` or `{mode, claim, custom:{latitude, longitude, width_km, before_date, after_date}}` → 202 |
+| GET | `/investigations`, `/investigations/{id}` | status, timeline, imagery, verdict, sources |
+| GET | `/assets/{id}/{file}.png` | generated images (validated names only) |
+
+Errors: `{"error": {"code", "message"}}` — e.g. `INVALID_LOCATION`, `UNSUPPORTED_CLAIM`,
+`INSUFFICIENT_CLEAR_IMAGERY`, `SATELLITE_DOWNLOAD_FAILED`, `ANALYSIS_FAILED`, `INTERRUPTED`.
+
+## Verified behaviour
+
+- Cloudy scenes are rejected on **local** SCL coverage and other dates searched.
+- No imagery (open-ocean AOI) → three real searches, then inconclusive; no analysis invented.
+- Ollama offline → rule-based decisions, "visual interpretation unavailable", measurements and
+  verdict still produced.
+- Non-physical claim (taxes) → `UNSUPPORTED_CLAIM`.
+- Server restart mid-run → `interrupted`, never `completed`.
+
+## Limitations
+
+- 10 m resolution; regions < 0.5 ha (forest) / 1 ha (mining) are not reported.
+- Thresholds are configurable heuristics, not validated universal criteria.
+- MineWatch measures surface disturbance; it cannot prove expansion, cause, operator or legality.
+- The 4B VLM is fast but sometimes over-confident; its text never sets the verdict on its own.
+- Demo-site names are descriptive; no company is identified as responsible for any change.
+
 ## Notes
 
-- Scene-wide `eo:cloud_cover` is only a pre-filter. Example: `S2B_T12TUK_20190715T182114_L2A` reports 3.1 % cloud scene-wide but 71 % invalid over the Bingham AOI, so it is rejected.
-- Pixels with SCL classes no-data, saturated, cloud shadow, cloud (med/high), cirrus, snow are invalid; they render purple in previews and are excluded from measurements.
-- Previews use one shared 2–98 % stretch computed over pixels valid on both dates, so unchanged ground renders identically.
-
-- Earth Search `sentinel-2-c1-l2a` assets carry per-asset `scale=0.0001`, `offset=-0.1` (baseline ≥ 04.00). Calibration must read these from STAC metadata, never assume.
-- Remote COG reads use the GDAL settings in `app/config.py` (`GDAL_COG_ENV`); without them a 5 km window took ~46 s instead of ~2 s.
+- Earth Search assets carry per-asset `scale`/`offset`; calibration always reads them.
+- Remote COG reads use the GDAL settings in `app/config.py` (`GDAL_COG_ENV`); ~46 s → ~2 s per window.
