@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>The Earth Has Receipts</title></head>
+<body style="background:#0b1424;color:#d7e3f4;font-family:system-ui;padding:2rem">
+<h1>THE EARTH HAS RECEIPTS</h1>
+<p>Verify claims about our planet using autonomous AI and satellite evidence.</p>
+<pre id="h">Checking backend…</pre>
+<script>fetch('/health').then(r=>r.json()).then(j=>document.getElementById('h').textContent=JSON.stringify(j,null,2))</script>
+</body></html>
