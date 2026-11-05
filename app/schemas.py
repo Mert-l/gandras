@@ -45,6 +45,8 @@ class CreateInvestigation(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_indicator(self) -> "CreateInvestigation":
+        if self.indicator == "auto" and self.mode is None:
+            return self
         from app.indicators import LEGACY_MODES, REGISTRY
         if self.mode and self.indicator == "auto":
             self.indicator = LEGACY_MODES[self.mode]
@@ -54,6 +56,17 @@ class CreateInvestigation(BaseModel):
 
     @model_validator(mode="after")
     def _one_location(self) -> "CreateInvestigation":
-        if bool(self.case_id) == bool(self.custom):
-            raise ValueError("Provide exactly one of case_id or custom")
+        if self.case_id and self.custom:
+            raise ValueError("Provide either case_id or custom, not both")
+        return self
+
+
+class ConfirmLocation(BaseModel):
+    candidate_id: str | None = Field(default=None, max_length=64)
+    custom: CustomLocation | None = None
+
+    @model_validator(mode="after")
+    def _one(self) -> "ConfirmLocation":
+        if bool(self.candidate_id) == bool(self.custom):
+            raise ValueError("Provide exactly one candidate_id or custom location")
         return self

@@ -7,12 +7,12 @@ import traceback
 from datetime import date, timedelta
 
 from app import database
-from app.agent import planner, tools
+from app.agent import planner
 from app.agent.state import InvestigationState, Step
 from app.config import get_settings
 from app.database import now
 from app.satellite import cache
-from app.verification import evaluator, report
+from app.verification import report
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +60,11 @@ class Runner:
         stats0 = dict(cache.STATS)
         self._save()
         try:
+            if not st.location:
+                from app.agent.location import resolve_location
+                if not resolve_location(st, self._save, self.use_llm):
+                    return st
+            from app.agent import tools
             if not self._interpret_claim():
                 return st
             while True:
@@ -74,12 +79,10 @@ class Runner:
                 self._execute(action, reason, params, by)
             st.from_cache = cache.STATS["misses"] == stats0["misses"] and cache.STATS["hits"] > stats0["hits"]
             st.status = "completed"
-        except tools.ToolError as e:
-            self._fail(e.code, str(e))
         except Exception as e:  # noqa: BLE001 - execution failure, reported as such
             log.error("investigation %s failed: %s", st.investigation_id, traceback.format_exc())
             msg = str(e)
-            code = "SATELLITE_DOWNLOAD_FAILED" if ("STAC" in msg or "Failed to read" in msg) else "ANALYSIS_FAILED"
+            code = getattr(e, "code", None) or ("SATELLITE_DOWNLOAD_FAILED" if ("STAC" in msg or "Failed to read" in msg) else "ANALYSIS_FAILED")
             self._fail(code, f"{type(e).__name__}: {msg[:300]}")
         st.current_step = None
         self._save()
@@ -140,6 +143,7 @@ class Runner:
         return True
 
     def _execute(self, action: str, reason: str, params: dict, by: str):
+        from app.agent import tools
         st = self.st
         step = self._begin(action, reason, by, {"parameters": params} if params else None)
         st.tool_call_count += 1
@@ -208,6 +212,7 @@ class Runner:
                 {"observations": len(an["observations"]), "cached": res.get("cached", False)})
 
     def _assess(self):
+        from app.verification import evaluator
         from app.indicators import get
         st = self.st
         return evaluator.assess(get(st.indicator), st.claim_interpretation["direction"], st.analysis,
@@ -225,6 +230,7 @@ class Runner:
         return txt, st.evidence_assessment
 
     def _finalize(self, by: str, reason: str, budget_hit: bool = False):
+        from app.verification import evaluator
         st = self.st
         step = self._begin("finalize", reason, by)
         from app.indicators import get
@@ -241,6 +247,12 @@ class Runner:
             sec["limitations"].append("Insufficient clear imagery for the requested periods.")
         if budget_hit:
             sec["limitations"].append(f"The investigation stopped at its {self.max_steps}-action budget.")
+        if st.location_resolution:
+            sec["limitations"].extend(st.location_resolution.get("location", {}).get("uncertainty", []) if st.location_resolution.get("location") else [])
+            if (st.temporal_scope or {}).get("date_basis"):
+                sec["limitations"].append("Automatically selected dates are comparison targets inferred from the claim; acquisition timestamps identify the actual observations.")
+            from app.location.scope import constrain_verdict
+            v = constrain_verdict(v, st.location, st.location_resolution)
         v.update({"observed": sec["observed"], "inferred": sec["inferred"], "not_established": sec["not_established"]})
         st.verdict = v
         st.limitations = sec["limitations"]
@@ -252,6 +264,10 @@ class Runner:
                        "acquired_at": x["scene"]["acquired_at"], "url": x["scene"].get("self_href"),
                        "processing_baseline": x["scene"].get("processing_baseline")}
                       for role, x in st.selected_scenes.items()]
+        if st.location_resolution:
+            st.sources.extend({"type": "geographic", **s} for s in st.location_resolution.get("sources", []))
+            st.methodology["location_discovery"] = {k: st.location_resolution.get(k) for k in ("verification_status", "explanation", "attempts")}
+            st.methodology["aoi_boundary_status"] = (st.location or {}).get("boundary_status")
         st.methodology["verification_rules"] = evaluator.__doc__.strip()
         st.methodology["evidence_thresholds"] = evaluator.EvidenceThresholds().model_dump()
         st.progress_percent = 100

@@ -29,7 +29,8 @@ class ToolError(Exception):
 
 def aoi_of(st: InvestigationState) -> AOI:
     loc = st.location
-    return AOI(name=loc["name"], lat=loc["latitude"], lon=loc["longitude"], width_m=loc["width_km"] * 1000)
+    return AOI(name=loc["name"], lat=loc["latitude"], lon=loc["longitude"], width_m=loc["width_km"] * 1000,
+               geometry=loc.get("geometry") if loc.get("boundary_status") == "verified" else None)
 
 
 def grid_of(st: InvestigationState) -> AnalysisGrid:
@@ -88,6 +89,8 @@ def _load_pair(st: InvestigationState, before_role="before", after_role="after")
     b, a = _scene(st.selected_scenes[before_role]), _scene(st.selected_scenes[after_role])
     B, A = load_scene(b, grid, bands=bands), load_scene(a, grid, bands=bands)
     vb, va = valid_mask(B["SCL"]), valid_mask(A["SCL"])
+    inside = aoi_of(st).mask(grid)
+    vb, va = vb & inside, va & inside
     return grid, b, a, B, A, vb, va, common_valid(vb, va)
 
 
@@ -99,13 +102,17 @@ def run_analysis(st: InvestigationState) -> tuple[str, dict]:
     from app.indicators import get
     ind = get(st.indicator)
     grid, b, a, B, A, vb, va, both = _load_pair(st)
-    if both.mean() < 0.3:
-        raise ToolError("INSUFFICIENT_CLEAR_IMAGERY", f"Only {both.mean():.0%} of the AOI is clear on both dates")
+    inside = aoi_of(st).mask(grid)
+    valid_fraction = float(both.sum()) / max(1, int(inside.sum()))
+    if valid_fraction < 0.3:
+        raise ToolError("INSUFFICIENT_CLEAR_IMAGERY", f"Only {valid_fraction:.0%} of the AOI is clear on both dates")
     res = ind.analyze(B, A, both, grid, _direction(st))
     r = res["result"]
     pair = describe_pair(b, a)
     r["pair"] = pair
-    r["common_valid_pct"] = round(100 * float(both.mean()), 2)
+    r["common_valid_pct"] = round(100 * valid_fraction, 2)
+    r["aoi_area_ha"] = round(int(inside.sum()) * grid.pixel_area_m2 / 10000, 2)
+    r["valid_fraction_of_aoi"] = round(valid_fraction, 4)
     r["indicator"] = ind.id
     r["evidence_label"] = ind.evidence_label
 

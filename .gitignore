@@ -9,3 +9,6 @@ data/investigations/*
 !data/investigations/.gitkeep
 data/*.db
 .DS_Store
+
+data/*.log
+data/location-research.json

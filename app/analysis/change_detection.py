@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-from pyproj import Transformer
 
 from app.analysis.measurements import area_ha
-from app.satellite.aoi import AnalysisGrid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.satellite.aoi import AnalysisGrid
 
 
 def clean_mask(mask: np.ndarray, open_px: int = 1) -> np.ndarray:
@@ -25,6 +27,7 @@ def regions(mask: np.ndarray, grid: AnalysisGrid, min_area_ha: float,
     (e.g. delta_ndvi) computed over the region's pixels, ignoring NaN.
     """
     n, labels, stats, cents = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    from pyproj import Transformer
     to_wgs = Transformer.from_crs(grid.epsg, 4326, always_xy=True)
     t = grid.transform
     min_px = min_area_ha * 10_000 / grid.pixel_area_m2

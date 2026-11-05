@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>The Earth Has Receipts</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/vendor/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </head>
 <body>
   <header class="topbar">
@@ -24,27 +26,26 @@
     <aside class="sidebar">
       <section class="panel">
         <h2 class="panel-title">New investigation</h2>
-        <div class="field">
-          <span class="label" id="indicator-label">Indicator</span>
-          <div id="indicator-picker" class="indicator-picker" role="radiogroup" aria-labelledby="indicator-label"></div>
-        </div>
-        <div id="indicator-info" class="indicator-info"></div>
-
+        <p class="muted claim-intro">Name the project or place in your claim. Gandras will research its location and check the satellite evidence.</p>
+        <p id="discovery-notice" class="note warn" hidden></p>
         <form id="inv-form" novalidate>
           <label class="field">
-            <span class="label">Demo case</span>
-            <select id="case-select"></select>
+            <span class="label">What would you like to verify?</span>
+            <textarea id="claim" rows="6" placeholder="e.g. Has vegetation increased around the named restoration project in Brazil since 2022?"></textarea>
           </label>
-          <div id="case-info" class="case-info" hidden></div>
-
-          <label class="field">
-            <span class="label">Claim</span>
-            <textarea id="claim" rows="4" placeholder="e.g. A new warehouse complex was built here between 2019 and 2024."></textarea>
-          </label>
-
+          <details class="advanced-options">
+            <summary>Analysis options &amp; demo cases</summary>
+            <div class="field">
+              <span class="label" id="indicator-label">Indicator</span>
+              <div id="indicator-picker" class="indicator-picker" role="radiogroup" aria-labelledby="indicator-label"></div>
+            </div>
+            <div id="indicator-info" class="indicator-info"></div>
+            <label class="field"><span class="label">Demo case (optional)</span><select id="case-select"></select></label>
+            <div id="case-info" class="case-info" hidden></div>
+          </details>
           <details id="custom-loc" class="custom-loc">
-            <summary>Custom location</summary>
-            <p class="hint">When opened and filled in, these values are sent instead of the demo case.</p>
+            <summary>Enter location manually (optional)</summary>
+            <p class="hint">Use a specific sampling area instead of automatic location discovery.</p>
             <div class="grid2">
               <label class="field"><span class="label">Latitude</span><input id="c-lat" type="number" step="any" min="-84" max="84"></label>
               <label class="field"><span class="label">Longitude</span><input id="c-lon" type="number" step="any" min="-180" max="180"></label>
@@ -63,7 +64,7 @@
       <section class="panel">
         <div class="panel-head">
           <h2 class="panel-title">Recent investigations</h2>
-          <button id="refresh-recent" class="btn-ghost small" type="button" title="Refresh">↻</button>
+          <button id="refresh-recent" aria-label="Refresh recent investigations" class="btn-ghost small" type="button" title="Refresh">↻</button>
         </div>
         <ul id="recent-list" class="recent-list"><li class="muted">Loading…</li></ul>
       </section>
@@ -73,7 +74,7 @@
       <div id="empty-state" class="empty-state">
         <div class="empty-globe" aria-hidden="true"></div>
         <h2>No investigation selected</h2>
-        <p>Describe a claim, pick an indicator (or let the agent auto-detect one) and a demo case or custom location, then press <strong>Investigate</strong>. Or open a recent investigation to replay its evidence.</p>
+        <p>Enter a claim naming a project or place, then press <strong>Investigate</strong>. You can also choose a demo case or enter a custom location.</p>
       </div>
       <div id="investigation" hidden></div>
     </section>

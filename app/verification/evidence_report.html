@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Evidence report · The Earth Has Receipts</title>
 <style>
 *{box-sizing:border-box}body{font:16px/1.6 system-ui,sans-serif;background:#eef2ef;color:#192d26;margin:0}main{max-width:1200px;margin:auto;padding:36px}h1{font-size:38px;line-height:1.15}h2{font-size:23px}section,header{background:white;border:1px solid #cbd7cf;border-radius:12px;padding:24px;margin-bottom:20px}small,.muted{color:#52655b}button{font:inherit;cursor:pointer;border:1px solid #537262;border-radius:6px;background:white;color:#192d26;padding:10px}button[aria-pressed=true]{background:#153e2c;color:white}.images{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}figure{margin:0;min-width:0}.frame{position:relative}.frame img{display:block;width:100%;height:auto}.highlight{position:absolute;border:3px solid #00ffff;box-shadow:0 0 0 2px #10271f;pointer-events:none}figcaption{overflow-wrap:anywhere;font-size:13px}.findings{display:flex;flex-wrap:wrap;gap:8px}.verdict{border-left:6px solid #987222}.supported{border-color:#27845c}.contradicted{border-color:#c34b35}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #dce3dd;overflow-wrap:anywhere}td:first-child{width:38%}pre{white-space:pre-wrap;overflow-wrap:anywhere}.actions{display:flex;gap:12px;margin-bottom:20px}#selection{font-weight:600}a{color:#175c43}@media(max-width:800px){main{padding:16px}.images{grid-template-columns:1fr}h1{font-size:28px}}@media print{body{background:white}main{padding:0}.actions{display:none}section,header{break-inside:avoid;padding:14px}.images{grid-template-columns:repeat(3,minmax(0,1fr))}button{color:black!important;background:white!important}h1{font-size:28px}}
@@ -24,6 +24,14 @@ $('legend').textContent=Object.entries(m.overlay_legend||{}).map(([k,v])=>k+': '
 const buttons=[];function select(r,button){buttons.forEach(b=>b.setAttribute('aria-pressed',String(b===button)));const bounds=r?.bbox_px;const valid=bounds?.length===4&&bounds.every(Number.isFinite)&&grid.width>0&&grid.height>0;boxes.forEach(b=>{b.hidden=!valid;if(valid){const[x,y,w,h]=bounds;b.style.left=100*x/grid.width+'%';b.style.top=100*y/grid.height+'%';b.style.width=100*w/grid.width+'%';b.style.height=100*h/grid.height+'%';}});$('selection').textContent=r?`Finding ${r.id}: ${r.area_ha} ha. ${valid?'Cyan boxes show its bounds.':'Region geometry unavailable.'}`:'No region selected';$('detail').replaceChildren();if(r)table(r,$('detail'));}
 (m.regions||[]).forEach(r=>{const b=node('button',`Region ${r.id} · ${r.area_ha} ha`,$('findings'));b.type='button';b.setAttribute('aria-pressed','false');b.onclick=()=>select(r,b);buttons.push(b);});if(!buttons.length)node('p','No qualifying change regions reported. This does not prove that no change occurred.',$('findings'));
 $('reset').onclick=()=>select(null,null);$('print').onclick=()=>window.print();
+if(d.location_resolution){
+  const geographic=section('Geographic location and verification');
+  table({status:d.location_resolution.verification_status,boundary_status:d.location?.boundary_status,
+    explanation:d.location_resolution.explanation,coordinates:d.location?{latitude:d.location.latitude,longitude:d.location.longitude}:null,
+    bbox:d.location?.bbox,boundary_source:d.location?.boundary_source},geographic);
+  list(d.location?.uncertainty,geographic);
+  (d.location?.evidence||[]).forEach(e=>{node('blockquote',e.quote,geographic);if(/^https?:\/\//i.test(e.url||'')){const a=node('a','Geographic source',geographic);a.href=e.url;a.rel='noopener noreferrer';}});
+}
 for(const[key,title]of [['observed','Observed'],['inferred','Inferred'],['not_established','Not established'],['rationale','Verdict rationale']])list(v[key],section(title));
 if(d.headline) table(d.headline,section('Key result'));
 table(Object.fromEntries(Object.entries(m).filter(([k])=>k!=='regions')),section('Metrics'));

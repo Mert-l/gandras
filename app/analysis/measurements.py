@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.satellite.aoi import AnalysisGrid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.satellite.aoi import AnalysisGrid
 
 
 def area_ha(pixel_count: int | float, grid: AnalysisGrid) -> float:

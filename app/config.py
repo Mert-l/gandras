@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     database_path: Path = PROJECT_ROOT / "data" / "investigations.db"
 
     http_timeout_s: float = 20.0
+    web_search_provider: str = "tavily"
+    tavily_api_key: str = ""
+    brave_search_api_key: str = ""
+    searxng_url: str = ""
+    # Set explicitly to a hosted/self-hosted Nominatim-compatible endpoint.
+    nominatim_url: str = ""
+    location_user_agent: str = "Gandras/0.2 (https://github.com/Mert-l/gandras)"
+    location_search_attempts: int = 3
+    provisional_aoi_width_km: float = 5.0
 
     def resolve(self, p: Path) -> Path:
         return p if p.is_absolute() else (PROJECT_ROOT / p).resolve()

@@ -10,7 +10,10 @@ from pydantic import BaseModel
 
 from app.analysis.change_detection import clean_mask, regions
 from app.analysis.measurements import mask_area_ha, safe_fraction
-from app.satellite.aoi import AnalysisGrid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.satellite.aoi import AnalysisGrid
 
 SCL_WATER = 6
 SCL_VEGETATION = 4

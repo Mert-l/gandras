@@ -52,7 +52,19 @@ def render_evidence_report(state: dict, assets_root) -> str:
     payload = {k: state.get(k) for k in (
         'investigation_id', 'claim', 'status', 'created_at', 'updated_at', 'location',
         'temporal_scope', 'verdict', 'measurements', 'headline', 'methodology', 'sources',
-        'limitations', 'from_cache', 'error')}
+        'limitations', 'from_cache', 'error', 'location_resolution')}
+    sources = list(payload.get('sources') or [])
+    seen = {s.get('url') for s in sources}
+    resolution = state.get('location_resolution') or {}
+    for source in resolution.get('sources', []):
+        if source.get('url') not in seen:
+            sources.append({'type': 'geographic', **source})
+            seen.add(source.get('url'))
+    location = state.get('location') or {}
+    if location.get('boundary_source') and location['boundary_source'] not in seen:
+        sources.append({'type': 'geographic', 'title': 'Published project boundary',
+                        'url': location['boundary_source'], 'retrieved_at': location.get('boundary_retrieved_at')})
+    payload['sources'] = sources
     imagery = state.get('imagery') or {}
     payload['images'] = []
     for role, meta in [('Before', imagery.get('before') or {}),

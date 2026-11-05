@@ -4,7 +4,7 @@
   "use strict";
 
   const POLL_MS = 1500;
-  const TERMINAL = new Set(["completed", "failed", "interrupted"]);
+  const TERMINAL = new Set(["completed", "failed", "interrupted", "awaiting_location", "location_unresolved"]);
 
   const state = {
     indicator: "auto",   // picker value: "auto" or an indicator id
@@ -152,12 +152,18 @@
     const txt = pill.querySelector(".health-text");
     try {
       const h = await api("/health");
+      const discovery = h.location_discovery;
+      const notice = $("discovery-notice");
+      if (notice && discovery) {
+        notice.hidden = discovery.search_configured && discovery.geocoder_configured;
+        notice.textContent = "Automatic location lookup needs server setup. You can still select a demo case or enter a location below.";
+      }
       pill.classList.remove("ok", "degraded", "down");
       pill.classList.add(h.status === "ok" ? "ok" : "degraded");
       const model = h.model ? String(h.model) : "model";
       const modelState = h.model_available ? "ready" : "unavailable";
       const sat = h.satellite_provider ? String(h.satellite_provider) : "satellite";
-      txt.textContent = model + " " + modelState + " · " + sat;
+      txt.textContent = model + " " + modelState + " \u00b7 " + sat;
       pill.title = JSON.stringify(h, null, 2);
     } catch (e) {
       pill.classList.remove("ok", "degraded");
@@ -305,8 +311,8 @@
     } else {
       for (const c of cases) sel.appendChild(el("option", { value: c.id, text: c.name || c.id }));
     }
-    sel.appendChild(el("option", { value: "", text: "— none (custom location) —" }));
-    if (prev && cases.some((c) => c.id === prev)) sel.value = prev;
+    sel.insertBefore(el("option", { value: "", text: "Discover location from claim" }), sel.firstChild);
+    sel.value = prev && cases.some((c) => c.id === prev) ? prev : "";
     onCaseChange(sel.value !== state.lastCaseId);
   }
 
@@ -318,7 +324,7 @@
     clear(info);
     if (!c) {
       info.hidden = true;
-      if (!sel.value && state.casesLoaded) $("custom-loc").open = true;
+
       return;
     }
     if (fillClaim !== false) $("claim").value = c.default_claim || "";
@@ -385,9 +391,6 @@
       }
     } else if (caseId) {
       body.case_id = caseId;
-    } else {
-      showErrorBox(errBox, { code: "INCOMPLETE", message: "Choose a demo case or open “Custom location”.", items: [] });
-      return;
     }
 
     btn.disabled = true;
@@ -464,6 +467,8 @@
       try { history.replaceState(null, "", "#inv=" + encodeURIComponent(id)); } catch (_) { /* ignore */ }
     }
     state.last = null;
+    state.view?.mapResizeObserver?.disconnect();
+    state.view?.locationMap?.remove();
     state.view = null;
     $("empty-state").hidden = true;
     const root = clear($("investigation"));
@@ -509,12 +514,15 @@
   }
 
   function buildSkeleton() {
+    state.view?.mapResizeObserver?.disconnect();
+    state.view?.locationMap?.remove();
     const root = clear($("investigation"));
     const v = {};
     v.header = el("div", { class: "panel" });
     v.fatal = el("div");
     v.cache = el("div");
     v.verdict = el("div");
+    v.location = el("div");
     v.imagery = el("section", { class: "panel" });
     v.timelinePanel = el("section", { class: "panel" },
       el("div", { class: "section-title" }, el("span", { text: "Agent activity" }), v.stepCount = el("span", { class: "muted", text: "" })));
@@ -526,9 +534,8 @@
     v.imageryKey = undefined;
     v.resultsKey = undefined;
     root.appendChild(el("div", { class: "inv" },
-      v.header, v.fatal, v.cache, v.verdict,
-      el("div", { class: "two-col" }, v.imagery, v.timelinePanel),
-      v.results));
+      v.header, v.fatal, v.cache, v.verdict, v.location,
+      el("div", { class: "two-col" }, v.imagery, v.timelinePanel), v.results));
     return v;
   }
 
@@ -539,6 +546,11 @@
     }
     const v = state.view;
     renderHeader(v, d);
+    const locationKey = JSON.stringify([d.location, d.location_resolution, d.status]);
+    if (locationKey !== v.locationKey) {
+      v.locationKey = locationKey;
+      renderLocation(v, d);
+    }
 
     clear(v.fatal);
     if (d.status === "failed" || d.status === "interrupted") v.fatal.appendChild(fatalBox(d.status, d.error));
@@ -555,7 +567,7 @@
     }
     updateLegends(v, d);
 
-    const resKey = JSON.stringify([d.verdict, d.headline, d.measurements, d.indicator_info, d.visual_analysis, d.methodology, d.sources, d.limitations]);
+    const resKey = JSON.stringify([d.status, d.verdict, d.headline, d.measurements, d.indicator_info, d.visual_analysis, d.methodology, d.sources, d.limitations]);
     if (resKey !== v.resultsKey) {
       v.resultsKey = resKey;
       renderVerdict(v, d);
@@ -632,7 +644,7 @@
           loc ? el("span", { text: (loc.name ? loc.name + " · " : "") + fmtNum(loc.latitude, 4) + ", " + fmtNum(loc.longitude, 4) + " · " + fmtNum(loc.width_km, 1) + " km" }) : null,
           ts ? el("span", { text: "Before ≈ " + (ts.before_target || "?") + " · After ≈ " + (ts.after_target || "?") }) : null,
           el("span", { class: "mono", text: d.investigation_id }))),
-      el("div", { class: "inv-actions" }, el("span", { class: "chip s-" + status, text: status }), report, dl,
+      el("div", { class: "inv-actions" }, el("span", { class: "chip s-" + status, text: status === "awaiting_location" ? "Confirm location" : status === "location_unresolved" ? "Location needed" : status }), report, dl,
         el("button", { type: "button", class: "btn-ghost", on: { click: downloadReport } }, "Raw JSON"))));
     v.header.appendChild(renderIndicatorBlock(d));
 
@@ -873,11 +885,130 @@
     return { root: el("div", null, container, controls, sceneIds) };
   }
 
+  async function updateLocation(d, payload, errorBox) {
+    errorBox.hidden = true;
+    try {
+      await api("/investigations/" + encodeURIComponent(d.investigation_id) + "/location", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      openInvestigation(d.investigation_id);
+    } catch (e) { showErrorBox(errorBox, e.info || { code: "ERROR", message: e.message }); }
+  }
+
+  function renderLocation(v, d) {
+    v.mapResizeObserver?.disconnect();
+    if (v.locationMap) { v.locationMap.remove(); v.locationMap = null; }
+    clear(v.location);
+    const resolution = d.location_resolution;
+    const loc = d.location;
+    const p = panel("Geographic evidence");
+    v.location.appendChild(p);
+    if (!loc && !resolution) {
+      p.appendChild(el("p", { class: "muted", text: "Researching the location named in your claim. Follow the source checks in Activity." }));
+      return;
+    }
+    if (resolution?.explanation) p.appendChild(el("p", { class: "muted", text: resolution.explanation }));
+    const errorBox = el("div", { class: "error-box", hidden: true });
+    p.appendChild(errorBox);
+    if (loc) {
+      const verified = loc.boundary_status === "verified";
+      p.appendChild(el("div", { class: "location-heading" },
+        el("h3", { text: loc.name || "Investigation location" }),
+        el("span", { class: "chip", text: verified ? "Source-verified boundary" : "Approximate area" })));
+      p.appendChild(el("p", { class: "muted", text: fmtNum(loc.latitude, 5) + ", " + fmtNum(loc.longitude, 5) +
+        " · " + (verified ? "Analysis clipped to the published polygon." : "Sampling window; project-wide conclusions are not established.") }));
+      const mapNode = el("div", { class: "location-map", "aria-label": "Map of the investigation area", role: "region" });
+      p.appendChild(mapNode);
+      const mapStatus = el("p", { class: "hint", text: "Loading basemap…" });
+      p.appendChild(mapStatus);
+      const mapUrl = "https://www.openstreetmap.org/?mlat=" + encodeURIComponent(loc.latitude) + "&mlon=" + encodeURIComponent(loc.longitude) + "#map=13/" + loc.latitude + "/" + loc.longitude;
+      p.appendChild(el("a", { href: mapUrl, target: "_blank", rel: "noopener noreferrer", text: "View location on OpenStreetMap" }));
+      if (window.L) {
+        // Defer until the panel is attached. Leaflet receives DOM nodes for any user text.
+        requestAnimationFrame(() => {
+          if (!mapNode.isConnected) return;
+          const L = window.L;
+          const map = L.map(mapNode, { scrollWheelZoom: false }); v.locationMap = map;
+          const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' });
+          tiles.on("tileerror", () => { mapStatus.hidden = false; mapStatus.textContent = "Basemap unavailable. The location outline is still shown; use the map link for more context."; });
+          tiles.on("tileload", () => { mapStatus.hidden = true; });
+          tiles.addTo(map);
+          L.circleMarker([loc.latitude, loc.longitude], { radius: 5, color: "#285c43", fillOpacity: 1 }).addTo(map);
+          let layer;
+          if (verified && loc.geometry) layer = L.geoJSON(loc.geometry, { style: { color: "#285c43", weight: 2 } }).addTo(map);
+          else {
+            const half = loc.width_km / 2;
+            const dy = half / 110.574, dx = half / (111.32 * Math.cos(loc.latitude * Math.PI / 180));
+            const b = loc.bbox || [loc.longitude-dx, loc.latitude-dy, loc.longitude+dx, loc.latitude+dy];
+            layer = L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: "#986b24", dashArray: "5 5", weight: 2 }).addTo(map);
+          }
+          let fitted = false;
+          const resize = () => {
+            if (!mapNode.getBoundingClientRect().width) return;
+            map.invalidateSize();
+            if (!fitted) { map.fitBounds(layer.getBounds(), { padding: [20, 20] }); fitted = true; }
+          };
+          resize();
+          v.mapResizeObserver = new ResizeObserver(resize);
+          v.mapResizeObserver.observe(mapNode);
+        });
+      } else {
+        mapStatus.hidden = true;
+        mapNode.appendChild(el("p", { class: "muted", text: "Map preview unavailable. Use the map link below." }));
+      }
+      (loc.uncertainty || []).forEach(t => p.appendChild(el("p", { class: "hint", text: t })));
+    }
+    if (!loc && resolution?.candidates?.length) {
+      p.appendChild(el("h3", { text: "Confirm the intended location" }));
+      resolution.candidates.forEach(c => {
+        const card = el("div", { class: "location-candidate" },
+          el("strong", { text: c.name }), el("p", { class: "muted", text: [c.region, c.country, c.geocoder_label].filter(Boolean).join(" · ") }),
+          el("p", { class: "hint", text: c.explanation || "This location needs your confirmation." }),
+          el("button", { class: "btn-ghost", type: "button", text: "Investigate this location",
+            on: { click: () => updateLocation(d, { candidate_id: c.id }, errorBox) } }));
+        (c.evidence_urls || []).forEach(url => { if (safeUrl(url)) card.appendChild(el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Supporting source" })); });
+        p.appendChild(card);
+      });
+    }
+    const sourceLinks = loc?.evidence_urls || (resolution?.sources || []).map(s => s.url);
+    if (sourceLinks?.length) p.appendChild(el("div", { class: "location-sources" },
+      Array.from(new Set(sourceLinks)).map((url, i) => safeUrl(url) ? el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Location source " + (i+1) }) : null)));
+    if (loc?.geocoder_url) p.appendChild(el("a", { href: safeUrl(loc.geocoder_url), target: "_blank", rel: "noopener noreferrer", text: "Geocoding record · © OpenStreetMap contributors (ODbL)" }));
+    if (TERMINAL.has(d.status)) {
+      const editor = el("details", { class: "custom-loc location-editor" }, el("summary", { text: "Edit location / enter coordinates manually" }));
+      const fields = {};
+      const form = el("form", { class: "grid2" });
+      for (const [key, label, value, type] of [
+        ["latitude", "Latitude", loc?.latitude, "number"], ["longitude", "Longitude", loc?.longitude, "number"],
+        ["width_km", "Width (km)", loc?.width_km || 5, "number"],
+        ["before_date", "Before date", d.temporal_scope?.before_target, "date"],
+        ["after_date", "After date", d.temporal_scope?.after_target, "date"],
+      ]) {
+        fields[key] = el("input", { type, step: type === "number" ? "any" : null, value: value ?? "", required: true });
+        form.appendChild(el("label", { class: "field" }, el("span", { class: "label", text: label }), fields[key]));
+      }
+      form.appendChild(el("button", { type: "submit", class: "btn-primary", text: "Save location & investigate" }));
+      form.addEventListener("submit", event => {
+        event.preventDefault(); const custom = {};
+        Object.entries(fields).forEach(([key, input]) => { custom[key] = input.type === "number" ? Number(input.value) : input.value; });
+        updateLocation(d, { custom }, errorBox);
+      });
+      editor.appendChild(form); p.appendChild(editor);
+    }
+  }
+
   // ---------------------------------------------------------------- verdict & results
   function renderVerdict(v, d) {
     clear(v.verdict);
     const vd = d.verdict;
-    if (!vd) return;
+    if (!vd) {
+      const waiting = ["awaiting_location", "location_unresolved"].includes(d.status);
+      v.verdict.appendChild(panel(waiting ? "Location needed before analysis" : "Assessment pending", el("p", { class: "muted", text: waiting ?
+        "Confirm a candidate or enter a location above to continue. No satellite conclusion has been drawn." :
+        "The verdict will appear after the evidence has been assessed. Follow the investigation in Activity." })));
+      return;
+    }
     const status = vd.status || "inconclusive";
     v.verdict.appendChild(el("div", { class: "verdict " + status },
       el("div", { class: "verdict-kicker", text: "Verdict" }),
@@ -995,12 +1126,14 @@
       row2.appendChild(panel("Sources", el("ul", { class: "sources" }, d.sources.map((s) => {
         const u = safeUrl(s.url);
         return el("li", null,
-          el("div", { class: "sid", text: s.scene_id || "(no scene id)" }),
-          el("div", { class: "smeta", text: [s.type, s.provider, s.collection].filter(Boolean).join(" · ") + " · acquired " + fmtDateTime(s.acquired_at) }),
+          el("div", { class: "sid", text: s.scene_id || s.title || "Geographic source" }),
+          el("div", { class: "smeta", text: [s.type, s.provider, s.collection].filter(Boolean).join(" · ") +
+            (s.type === "geographic" ? " · retrieved " + fmtDateTime(s.retrieved_at) : " · acquired " + fmtDateTime(s.acquired_at)) }),
           u ? el("a", { href: u, target: "_blank", rel: "noopener noreferrer", text: "Open source record ↗" }) : null);
       }))));
     }
     if (row2.children.length) R.appendChild(row2);
+    else R.appendChild(panel("Sources & method", el("p", { class: "muted", text: "Acquisition records and analysis details will appear as the investigation progresses." })));
 
     if (Array.isArray(d.limitations) && d.limitations.length) R.appendChild(panel("Limitations", list(d.limitations)));
   }

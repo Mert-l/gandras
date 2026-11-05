@@ -432,3 +432,19 @@ details.collapsible > summary { cursor: pointer; color: var(--muted); font-size:
 input, select, textarea { min-width: 0; }
 .inv > div:empty { display: none; }
 .recent-meta { flex-wrap: wrap; }
+
+/* Claim-first geographic discovery. */
+.claim-intro { font-size: 13px; margin: -8px 0 22px; }
+.advanced-options { border-top: 1px solid var(--line); padding: 13px 0; }
+.advanced-options > summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.advanced-options[open] > summary { margin-bottom: 18px; }
+.location-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.location-heading h3 { font: 600 16px var(--sans); }
+.location-map { height: 280px; margin: 18px 0 10px; border: 1px solid var(--line); background: var(--bg2); z-index: 0; }
+.location-map a { color: var(--cyan); }
+.location-sources { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 14px 0; font-size: 12px; }
+.location-candidate { border: 1px solid var(--line); padding: 16px; margin-top: 12px; background: var(--bg2); }
+.location-candidate > a { display: inline-block; font-size: 12px; margin: 10px 12px 0 0; }
+.location-editor { margin-top: 18px; }
+.location-editor form { margin-top: 18px; }
+.chip.s-awaiting_location,.chip.s-location_unresolved { color: var(--amber); }

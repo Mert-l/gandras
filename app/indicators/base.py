@@ -11,7 +11,10 @@ from typing import Callable, Literal
 
 import numpy as np
 
-from app.satellite.aoi import AnalysisGrid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.satellite.aoi import AnalysisGrid
 
 Direction = Literal["increase", "decrease", "any"]
 STANDARD_BANDS = ["B02", "B03", "B04", "B08", "B11", "SCL"]

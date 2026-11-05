@@ -21,6 +21,7 @@ class AOI(BaseModel):
     lat: float = Field(ge=-84, le=84)  # UTM is undefined at the poles
     lon: float = Field(ge=-180, le=180)
     width_m: float = Field(gt=0)
+    geometry: dict | None = None  # Source-verified WGS84 Polygon/MultiPolygon only.
 
     @model_validator(mode="after")
     def _limit(self) -> "AOI":
@@ -50,6 +51,20 @@ class AOI(BaseModel):
 
     def grid(self, resolution_m: float) -> "AnalysisGrid":
         epsg = self.utm_epsg()
+        if self.geometry:
+            from shapely.geometry import shape
+            from shapely.ops import transform
+            from app.config import get_settings
+
+            polygon = transform(Transformer.from_crs(4326, epsg, always_xy=True).transform, shape(self.geometry))
+            west, south, east, north = polygon.bounds
+            left = math.floor(west / resolution_m) * resolution_m
+            top = math.ceil(north / resolution_m) * resolution_m
+            width = max(1, math.ceil((east-left) / resolution_m))
+            height = max(1, math.ceil((top-south) / resolution_m))
+            if width * height * resolution_m**2 > get_settings().max_aoi_km2 * 1e6:
+                raise ValueError("Published boundary exceeds the analysis area limit")
+            return AnalysisGrid(epsg=epsg, left=left, top=top, resolution_m=resolution_m, width=width, height=height)
         cx, cy = Transformer.from_crs(4326, epsg, always_xy=True).transform(self.lon, self.lat)
         n = max(1, int(round(self.width_m / resolution_m)))
         half = n * resolution_m / 2
@@ -57,6 +72,15 @@ class AOI(BaseModel):
         left = math.floor((cx - half) / resolution_m) * resolution_m
         top = math.floor((cy + half) / resolution_m) * resolution_m
         return AnalysisGrid(epsg=epsg, left=left, top=top, resolution_m=resolution_m, width=n, height=n)
+
+    def mask(self, grid: "AnalysisGrid"):
+        import numpy as np
+        if not self.geometry:
+            return np.ones((grid.height, grid.width), dtype=bool)
+        from rasterio.features import geometry_mask
+        from rasterio.warp import transform_geom
+        return geometry_mask([transform_geom('EPSG:4326', grid.crs, self.geometry)],
+                             out_shape=(grid.height, grid.width), transform=grid.transform, invert=True)
 
 
 class AnalysisGrid(BaseModel):

@@ -8,7 +8,7 @@ from app import database
 from app.agent.state import ASSETS_ROOT, load_demo_cases
 from app.config import get_settings
 from app.health import check_ollama, check_stac
-from app.schemas import CreateInvestigation
+from app.schemas import CreateInvestigation, ConfirmLocation
 from app.services import investigations as svc
 
 router = APIRouter()
@@ -33,6 +33,13 @@ async def health() -> dict:
         "satellite_provider": "earth-search",
         "stac_collection": s.stac_collection,
         "checks": {"ollama": ollama, "stac": stac},
+        "location_discovery": {
+            "search_provider": s.web_search_provider,
+            "search_configured": bool(s.tavily_api_key) if s.web_search_provider == "tavily" else
+                                 bool(s.brave_search_api_key) if s.web_search_provider == "brave" else
+                                 bool(s.searxng_url) if s.web_search_provider == "searxng" else False,
+            "geocoder_configured": bool(s.nominatim_url),
+        },
     }
 
 
@@ -60,6 +67,17 @@ def create_investigation(req: CreateInvestigation):
 @router.get("/investigations")
 def list_investigations() -> list[dict]:
     return database.list_recent()
+
+
+@router.post("/investigations/{inv_id}/location", status_code=202)
+def confirm_location(inv_id: str, req: ConfirmLocation):
+    if not INV_ID.fullmatch(inv_id):
+        return err(400, "INVALID_ID", "Malformed investigation id")
+    try:
+        st = svc.confirm_location(inv_id, req.candidate_id, req.custom.model_dump() if req.custom else None)
+    except svc.RequestError as e:
+        return err(404 if e.code == "NOT_FOUND" else 409 if e.code == "INVESTIGATION_BUSY" else 400, e.code, str(e))
+    return {"investigation_id": st.investigation_id, "status": st.status}
 
 
 @router.get("/investigations/{inv_id}")

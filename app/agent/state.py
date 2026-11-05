@@ -50,7 +50,7 @@ class InvestigationState(BaseModel):
     indicator: str | None = None
     indicator_info: dict | None = None
     case_id: str | None = None
-    status: Literal["queued", "running", "completed", "failed", "interrupted"] = "queued"
+    status: Literal["queued", "running", "awaiting_location", "location_unresolved", "completed", "failed", "interrupted"] = "queued"
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
     progress_percent: int = 0
@@ -58,6 +58,7 @@ class InvestigationState(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
     location: dict | None = None            # name, latitude, longitude, width_km
+    location_resolution: dict | None = None
     temporal_scope: dict | None = None      # before_target, after_target
     claim_interpretation: dict | None = None
 

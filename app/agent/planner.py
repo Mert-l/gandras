@@ -13,6 +13,7 @@ from app.agent.state import InvestigationState
 log = logging.getLogger(__name__)
 
 ACTION_DOCS = {
+    "resolve_location": "Research geographic clues using web search, source cross-checking and geocoding before retrieving imagery.",
     "find_before_observation": "Search the catalogue near the 'before' reference date and pick the clearest scene over the AOI.",
     "find_after_observation": "Search the catalogue near the 'after' reference date and pick the clearest scene over the AOI.",
     "search_more_imagery": "Search again for a missing or poor observation with a shifted/wider date window. "
@@ -25,6 +26,8 @@ ACTION_DOCS = {
 
 
 def allowed_actions(st: InvestigationState, max_retries: int) -> list[str]:
+    if not st.location:
+        return ["resolve_location"]
     retries_left = st.extra_searches < max_retries
     for role in ("before", "after"):
         if role not in st.selected_scenes:

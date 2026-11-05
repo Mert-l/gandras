@@ -144,3 +144,13 @@ verdict, metrics, acquisition timestamps, sources, methodology, and limitations.
 Raw JSON remains available separately. Incomplete investigations are labeled explicitly.
 
 `GET /investigations/{id}/report` opens the report; add `?download=true` to download it.
+
+## Automatic location discovery
+
+Start an investigation with only a natural-language claim naming a project or place. Gandras uses
+Qwen to plan real web research and Nominatim-compatible geocoding to identify the site. Ambiguous
+matches request confirmation; approximate AOIs remain provisional and cannot settle project-wide
+claims. Cases and manual coordinates remain available under optional form controls.
+
+Configure a search provider and geocoder as described in [docs/location-discovery.md](docs/location-discovery.md).
+No search results, coordinates or project boundaries are synthesized when a provider is unavailable.
