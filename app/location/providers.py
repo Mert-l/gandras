@@ -21,17 +21,42 @@ class ResearchError(RuntimeError):
     pass
 
 
-def public_url(url: str) -> str:
+def _checked_address(url: str) -> tuple[str, str]:
+    """Validate a URL and return (url, a resolved public IP). Every resolved address must be public."""
     p = urlparse(url)
     if p.scheme not in ('http', 'https') or not p.hostname or p.username or p.password or p.port not in (None, 80, 443):
         raise ResearchError('Source URL is not a public HTTP resource.')
     try:
-        addresses = socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == 'https' else 80))
-        if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
-            raise ResearchError('Private network sources are not permitted.')
+        addresses = socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == 'https' else 80),
+                                       proto=socket.IPPROTO_TCP)
     except OSError as exc:
         raise ResearchError('Source host could not be resolved.') from exc
-    return url
+    ips = [ipaddress.ip_address(a[4][0]) for a in addresses]
+    if not ips or any(not ip.is_global for ip in ips):
+        raise ResearchError('Private network sources are not permitted.')
+    return url, str(ips[0])
+
+
+def public_url(url: str) -> str:
+    return _checked_address(url)[0]
+
+
+def pinned_request(url: str) -> tuple[str, dict, dict]:
+    """Connect to the address that passed the public-IP check, not a second DNS answer.
+
+    Checking DNS and then letting the HTTP client resolve the name again leaves a rebinding window:
+    the second answer could point at 127.0.0.1 or a cloud metadata address. The request therefore
+    targets the checked IP literal; the original hostname goes in the Host header and is used for
+    TLS SNI and certificate verification (httpcore's `sni_hostname` extension).
+    Returns (connect_url, headers, extensions).
+    """
+    url, ip = _checked_address(url)
+    p = urlparse(url)
+    literal = f'[{ip}]' if ':' in ip else ip
+    connect = p._replace(netloc=literal + (f':{p.port}' if p.port else '')).geturl()
+    host = p.hostname + (f':{p.port}' if p.port else '')
+    extensions = {'sni_hostname': p.hostname} if p.scheme == 'https' else {}
+    return connect, {'Host': host}, extensions
 
 
 class TextPage(HTMLParser):
@@ -61,8 +86,8 @@ def fetch_source(url: str) -> dict:
     with httpx.Client(timeout=s.http_timeout_s, follow_redirects=False, trust_env=False,
                       headers={'User-Agent': s.location_user_agent}) as client:
         for _ in range(4):
-            public_url(url)
-            with client.stream('GET', url) as response:
+            connect, host_header, extensions = pinned_request(url)
+            with client.stream('GET', connect, headers=host_header, extensions=extensions) as response:
                 if response.is_redirect:
                     url = urljoin(url, response.headers.get('location', ''))
                     continue

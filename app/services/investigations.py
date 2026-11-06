@@ -21,6 +21,33 @@ class RequestError(ValueError):
         self.code = code
 
 
+def _on(year: int, today: date) -> date:
+    """Today's calendar date in `year` (29 Feb falls back to 28 Feb)."""
+    return date(year, today.month, min(today.day, 28 if today.month == 2 else today.day))
+
+
+def automatic_dates(claim: str, today: date) -> dict:
+    """Comparison targets for claims without explicit dates, anchored to one calendar date.
+
+    Both targets fall on today's month and day (in the first claim year, and in the last claim year
+    or today), so the two observations come from the same season: a January-vs-October pair mixes
+    snow, sun angle and vegetation phase into the change signal. If the claim names only the
+    current year, no same-season baseline exists, so the start of that year is used and flagged.
+    """
+    years = sorted({int(y) for y in re.findall(r'\b(?:19|20)\d{2}\b', claim) if 2017 <= int(y) <= today.year})
+    first = years[0] if years else max(2017, today.year - 3)
+    after = _on(years[-1], today) if len(years) > 1 and years[-1] < today.year else today
+    before = _on(first, today)
+    basis = ("Claim years where present, otherwise a three-year baseline; both targets use today's calendar date "
+             "so the observations share a season. Changes earlier in the first claim year may fall before the baseline. "
+             "Targets are not acquisition dates.")
+    if (after - before).days < 60:
+        before = date(first, 1, 1)
+        basis = ("The claim names only the current year, so the baseline is 1 January and the two observations "
+                 "are from different seasons. Targets are not acquisition dates.")
+    return {"before_target": before.isoformat(), "after_target": after.isoformat(), "date_basis": basis}
+
+
 def create(indicator: str, claim: str, case_id: str | None, custom: dict | None, options: dict | None) -> InvestigationState:
     if case_id:
         case = next((c for c in load_demo_cases() if c["id"] == case_id), None)
@@ -34,12 +61,7 @@ def create(indicator: str, claim: str, case_id: str | None, custom: dict | None,
         scope = {"before_target": str(custom["before_date"]), "after_target": str(custom["after_date"])}
     else:
         loc = None
-        today = date.today()
-        years = sorted({int(y) for y in re.findall(r'\b(?:19|20)\d{2}\b', claim) if 2017 <= int(y) <= today.year})
-        baseline = date(years[0], 1, 1) if years else date(max(2017, today.year-3), 1, 1)
-        end = min(today, date(years[-1], 12, 31)) if len(years) > 1 else today
-        scope = {"before_target": baseline.isoformat(), "after_target": end.isoformat(),
-                 "date_basis": "Claim years where present; otherwise a three-year baseline and today. Targets are not acquisition dates."}
+        scope = automatic_dates(claim, date.today())
     st = InvestigationState(investigation_id=new_id(), mode=indicator, requested_indicator=indicator, claim=claim,
                             indicator=None if indicator == "auto" else indicator, case_id=case_id, location=loc,
                             temporal_scope=scope, options=options or {})

@@ -139,7 +139,8 @@ def test_claim_only_creation_and_manual_fallback(monkeypatch):
     assert r.status_code == 202
     inv = r.json()['investigation_id']
     raw = database.load(inv)
-    assert raw['location'] is None and raw['temporal_scope']['before_target'] == '2022-01-01'
+    assert raw['location'] is None and raw['temporal_scope']['before_target'].startswith('2022-')
+    assert raw['temporal_scope']['before_target'][5:] == raw['temporal_scope']['after_target'][5:]  # same season
     raw.update(status='location_unresolved', location_resolution={'status': 'unresolved', 'candidates': []})
     database.save(raw)
     manual = {'latitude': -20.1, 'longitude': -44.2, 'width_km': 3,
@@ -281,8 +282,15 @@ def test_verified_location_continues_to_existing_pipeline(research_fixture, monk
 def test_provisional_scope_cannot_settle_project_claim():
     from app.location.scope import constrain_verdict
     confident = {'status': 'supported', 'confidence': 'high', 'summary': 'Changed'}
+    automatic = {'status': 'resolved', 'selection': 'automatic'}
+    assert constrain_verdict(confident, {'boundary_status': 'provisional'}, automatic)['status'] == 'inconclusive'
     assert constrain_verdict(confident, {'boundary_status': 'provisional'}, {'status': 'resolved'})['status'] == 'inconclusive'
-    assert constrain_verdict(confident, {'boundary_status': 'verified'}, {'status': 'resolved'}) == confident
+    assert constrain_verdict(confident, {'boundary_status': 'verified'}, automatic) == confident
+    # A user-confirmed or user-entered area behaves like a manual `custom` AOI: same coordinates,
+    # same verdict, whichever path supplied them.
+    user = {'status': 'resolved', 'selection': 'user'}
+    assert constrain_verdict(confident, {'boundary_status': 'provisional', 'verification_status': 'user_supplied'}, user) == confident
+    assert constrain_verdict(confident, {'boundary_status': 'provisional', 'verification_status': 'user_confirmed'}, user) == confident
     # Existing manually supplied case workflows retain their original scope behavior.
     assert constrain_verdict(confident, {}, None) == confident
 
@@ -435,8 +443,9 @@ def test_auto_location_handoff_preserves_claim_dates(research_fixture, monkeypat
     assert resolve_location(st, lambda: database.save(st.model_dump()))
     saved = database.load(st.investigation_id)
     assert saved['location']['latitude'] == -20.1
-    assert saved['temporal_scope']['before_target'] == '2020-01-01'
-    assert saved['temporal_scope']['after_target'] == '2023-12-31'
+    assert saved['temporal_scope']['before_target'].startswith('2020-')
+    assert saved['temporal_scope']['after_target'].startswith('2023-')
+    assert saved['temporal_scope']['before_target'][5:] == saved['temporal_scope']['after_target'][5:]
     assert saved['location_resolution']['selection'] == 'automatic'
     assert saved['error'] is None
 
@@ -466,3 +475,57 @@ def test_default_photon_geocodes_without_extra_setup(monkeypatch, tmp_path):
     assert requests[0][1]['params']['countrycode'] == 'BR'
     assert providers.geocode('North Field Brazil', 'br') == result
     assert len(requests) == 1
+
+
+def test_automatic_dates_share_a_season():
+    from datetime import date
+    from app.services.investigations import automatic_dates
+    today = date(2026, 11, 6)
+    after_2023 = automatic_dates('No construction here after 2023.', today)
+    assert (after_2023['before_target'], after_2023['after_target']) == ('2023-11-06', '2026-11-06')
+    span = automatic_dates('Trees were planted from 2020 to 2023.', today)
+    assert (span['before_target'], span['after_target']) == ('2020-11-06', '2023-11-06')
+    assert automatic_dates('The forest is intact.', today)['before_target'] == '2023-11-06'
+    leap = automatic_dates('Built after 2021.', date(2028, 2, 29))
+    assert leap['before_target'] == '2021-02-28'
+    same_year = automatic_dates('A road was built in 2026.', today)
+    assert same_year['before_target'] == '2026-01-01' and 'different seasons' in same_year['date_basis']
+
+
+def test_fetch_connects_to_checked_address_not_a_second_dns_answer(monkeypatch):
+    """DNS rebinding: a public answer at check time followed by 127.0.0.1 must not reach localhost."""
+    import socket
+    answers = iter(['93.184.215.14', '127.0.0.1'])
+    lookups = []
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        lookups.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (next(answers), port))]
+
+    monkeypatch.setattr(providers.socket, 'getaddrinfo', getaddrinfo)
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, headers={'content-type': 'text/html'}, text='<p>Site at North Field</p>')
+
+    original = httpx.Client
+    monkeypatch.setattr(providers.httpx, 'Client', lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
+    page = providers.fetch_source('https://site.example/page')
+    assert lookups == ['site.example']                      # resolved exactly once per hop
+    assert seen[0].url.host == '93.184.215.14'              # connected to the checked address
+    assert seen[0].headers['host'] == 'site.example'
+    assert seen[0].extensions['sni_hostname'] == 'site.example'  # TLS still verifies the real name
+    assert page['url'] == 'https://site.example/page' and 'North Field' in page['text']
+
+
+def test_redirect_to_private_address_is_rechecked(monkeypatch):
+    import socket
+    table = {'site.example': '93.184.215.14', 'internal.example': '10.0.0.5'}
+    monkeypatch.setattr(providers.socket, 'getaddrinfo',
+                        lambda host, port, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (table[host], port))])
+    original = httpx.Client
+    handler = lambda request: httpx.Response(302, headers={'location': 'https://internal.example/secret'})  # noqa: E731
+    monkeypatch.setattr(providers.httpx, 'Client', lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
+    with pytest.raises(providers.ResearchError, match='Private network'):
+        providers.fetch_source('https://site.example/page')

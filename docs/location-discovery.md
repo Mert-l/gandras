@@ -64,8 +64,11 @@ Search contracts follow the [Tavily Search API](https://docs.tavily.com/document
   accepted (a single-feature collection is also accepted). Multiple unrelated parcels require manual
   review; large boundaries fall back to a provisional sample rather than being silently truncated.
 - Verified polygons define the projected grid and mask both comparison and corroboration pixels.
-  Provisional boxes are sampling windows. Every automatically discovered/user-confirmed provisional
-  AOI forces a project-wide verdict to **inconclusive**, irrespective of measured change strength.
+  Provisional boxes are sampling windows. An automatically selected provisional AOI forces the verdict
+  to **inconclusive**, irrespective of measured change strength, because the system cannot be sure it
+  is sampling the claimed site. Once the user confirms a candidate or enters coordinates, the area is
+  treated exactly like a manually supplied `custom` AOI: the measured verdict stands, and the sampling
+  window and unverified-boundary notes remain in the report's limitations.
 - Quoted geographic evidence, retrieval timestamps, query history, uncertainty, boundary provenance
   and geocoding records are persisted and included in the portable report.
 - Multiple candidates do not block analysis. The selected place, coordinates, dates and alternatives
