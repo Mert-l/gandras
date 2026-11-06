@@ -54,7 +54,7 @@ def test_resolved_with_real_source_quotes_and_geocoder_contract(research_fixture
     f = research_fixture
     result = resolver.resolve(f['claim'])
     assert result['status'] == 'resolved'
-    assert len(f['queries']) >= 2 and len(set(f['queries'])) >= 2
+    assert len(f['queries']) == 1
     assert result['location']['latitude'] == -20.1
     assert result['location']['boundary_status'] == 'provisional'
     assert result['location']['geometry'] is None
@@ -62,13 +62,15 @@ def test_resolved_with_real_source_quotes_and_geocoder_contract(research_fixture
     assert result['location']['bbox'][0] < -44.2 < result['location']['bbox'][2]
 
 
-def test_ambiguous_geocoder_does_not_arbitrarily_choose(research_fixture):
+def test_multiple_matches_select_best_and_continue(research_fixture):
     f = research_fixture
     alternative = deepcopy(f['results'][0])
     alternative.update(lat='-20.2', boundingbox=['-20.21', '-20.19', '-44.21', '-44.19'])
     f['results'].append(alternative)
     result = resolver.resolve(f['claim'])
-    assert result['status'] == 'ambiguous' and result['location'] is None
+    assert result['status'] == 'resolved'
+    assert result['location']['latitude'] == -20.1
+    assert result['selection'] == 'automatic'
     assert len(result['candidates']) == 2
 
 
@@ -85,6 +87,17 @@ def test_fabricated_citations_never_verify(research_fixture):
     f = research_fixture
     for c in f['proposal']['citations']:
         c['quote'] = 'North Field is at a location that was never in the retrieved documents.'
+    result = resolver.resolve(f['claim'])
+    assert result['status'] == 'resolved'
+    assert result['location']['verification_status'] == 'approximate_location'
+    assert all('never in the retrieved' not in c['quote'] for c in result['location']['evidence'])
+    assert all(c['source_quality'] == 'unknown' for c in result['location']['evidence'])
+
+
+def test_candidate_name_absent_from_sources_is_rejected(research_fixture):
+    f = research_fixture
+    f['proposal']['name'] = 'Invented School'
+    f['proposal']['citations'] = []
     assert resolver.resolve(f['claim'])['status'] == 'unresolved'
 
 
@@ -94,12 +107,13 @@ def test_country_mismatch_rejected(research_fixture):
     assert resolver.resolve(f['claim'])['status'] == 'unresolved'
 
 
-def test_city_centroid_requires_confirmation(research_fixture):
+def test_city_match_continues_with_approximate_location(research_fixture):
     f = research_fixture
     f['results'][0]['addresstype'] = 'city'
     result = resolver.resolve(f['claim'])
-    assert result['status'] == 'ambiguous'
-    assert result['candidates'][0]['verification_status'] == 'needs_confirmation'
+    assert result['status'] == 'resolved'
+    assert result['location']['verification_status'] == 'approximate_location'
+    assert result['location']['boundary_status'] == 'provisional'
 
 
 def test_osm_polygon_is_not_property_boundary(research_fixture):
@@ -154,6 +168,7 @@ def test_candidate_confirmation_uses_saved_candidate_only(monkeypatch, research_
     saved = database.load(st.investigation_id)
     assert saved['imagery'] is None and saved['verdict'] is None
     assert saved['location_resolution']['verification_status'] == 'user_confirmed'
+    assert saved['location_resolution']['selection'] == 'user'
 
 
 def test_location_tool_persists_research_and_waits(research_fixture):
@@ -328,7 +343,7 @@ def test_polygon_analysis_grid_masks_outside_boundary():
     assert mask.shape == (grid.height, grid.width)
 
 
-def test_claim_country_cannot_be_silently_replaced(research_fixture, monkeypatch):
+def test_claim_country_mismatch_is_disclosed_on_selected_location(research_fixture, monkeypatch):
     f = research_fixture
     chat = resolver.chat
     def changed(system, data, schema):
@@ -337,8 +352,9 @@ def test_claim_country_cannot_be_silently_replaced(research_fixture, monkeypatch
         return chat(system, data, schema)
     monkeypatch.setattr(resolver, 'chat', changed)
     result = resolver.resolve(f['claim'].replace('Brazil', 'Chile'))
-    assert result['status'] == 'ambiguous'
-    assert all(c['verification_status'] == 'needs_confirmation' for c in result['candidates'])
+    assert result['status'] == 'resolved'
+    assert result['location']['verification_status'] == 'approximate_location'
+    assert any('country' in note.lower() for note in result['location']['uncertainty'])
 
 
 def test_empty_first_search_refines_then_resolves(research_fixture, monkeypatch):
@@ -358,5 +374,95 @@ def test_two_operator_subdomains_are_not_independent(research_fixture):
     f = research_fixture
     f['sources'][1]['url'] = 'https://research.operator.example/site'
     result = resolver.resolve(f['claim'])
-    assert result['status'] == 'ambiguous'
-    assert result['candidates'][0]['verification_status'] == 'needs_confirmation'
+    assert result['status'] == 'resolved'
+    assert result['location']['verification_status'] == 'approximate_location'
+
+
+def test_exact_site_ranked_above_city(research_fixture):
+    f = research_fixture
+    city = deepcopy(f['results'][0])
+    city.update(lat='-20.2', display_name='Minas Gerais, Brazil', addresstype='city',
+                boundingbox=['-20.21', '-20.19', '-44.21', '-44.19'])
+    f['results'].insert(0, city)
+    result = resolver.resolve(f['claim'])
+    assert result['status'] == 'resolved'
+    assert result['location']['latitude'] == -20.1
+
+
+def test_site_alias_ranked_above_broad_place_proposal(research_fixture):
+    f = research_fixture
+    # A local-language geocoder label may not literally match the English site name.
+    f['results'][0]['display_name'] = 'Campo Norte, Minas Gerais, Brasil'
+    f['proposal']['identity_consistent'] = False
+    broad = deepcopy(f['proposal'])
+    broad.update(name='Minas Gerais', specific_site=False, identity_consistent=False)
+    f['proposals'].insert(0, broad)
+    result = resolver.resolve(f['claim'])
+    assert result['location']['name'] == 'North Field'
+
+
+def test_single_source_is_enough_to_start_sampling(research_fixture):
+    f = research_fixture
+    f['proposal']['citations'] = f['proposal']['citations'][:1]
+    result = resolver.resolve(f['claim'])
+    assert result['status'] == 'resolved'
+    assert result['location']['verification_status'] == 'approximate_location'
+    assert len(f['queries']) == 1
+
+
+def test_failed_candidate_does_not_hide_usable_alternative(research_fixture, monkeypatch):
+    f = research_fixture
+    failing = deepcopy(f['proposal'])
+    failing['geocode_query'] = 'Unavailable place'
+    f['proposals'].insert(0, failing)
+    geocode = providers.geocode
+    def lookup(query, country):
+        if query == 'Unavailable place':
+            raise providers.ResearchError('Temporary geocoder failure')
+        return geocode(query, country)
+    monkeypatch.setattr(providers, 'geocode', lookup)
+    result = resolver.resolve(f['claim'])
+    assert result['status'] == 'resolved'
+    assert result['location']['latitude'] == -20.1
+
+
+def test_auto_location_handoff_preserves_claim_dates(research_fixture, monkeypatch):
+    from app.agent.location import resolve_location
+    from app.services import investigations as svc
+    monkeypatch.setattr(svc._executor, 'submit', lambda *args: None)
+    research_fixture['proposal']['citations'] = research_fixture['proposal']['citations'][:1]
+    st = svc.create('auto', 'Test Forestry planted trees at North Field in Brazil from 2020 to 2023.', None, None, {})
+    assert resolve_location(st, lambda: database.save(st.model_dump()))
+    saved = database.load(st.investigation_id)
+    assert saved['location']['latitude'] == -20.1
+    assert saved['temporal_scope']['before_target'] == '2020-01-01'
+    assert saved['temporal_scope']['after_target'] == '2023-12-31'
+    assert saved['location_resolution']['selection'] == 'automatic'
+    assert saved['error'] is None
+
+
+def test_default_photon_geocodes_without_extra_setup(monkeypatch, tmp_path):
+    s = get_settings()
+    monkeypatch.setattr(s, 'nominatim_url', '')
+    monkeypatch.setattr(s, 'cache_dir', tmp_path)
+    requests = []
+    def get(url, **kwargs):
+        requests.append((url, kwargs))
+        return httpx.Response(200, request=httpx.Request('GET', url), json={'features': [
+            {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [-44.2, -20.1]},
+             'properties': {'name': 'North Field', 'state': 'Minas Gerais', 'country': 'Brazil',
+                            'countrycode': 'BR', 'osm_type': 'W', 'osm_id': 123, 'osm_value': 'farm'}},
+            {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [-70, -30]},
+             'properties': {'name': 'North Field', 'countrycode': 'CL'}},
+        ]})
+    monkeypatch.setattr(providers.httpx, 'get', get)
+    result = providers.geocode('North Field Brazil', 'br')
+    assert len(result) == 1
+    assert float(result[0]['lat']) == -20.1 and float(result[0]['lon']) == -44.2
+    assert result[0]['osm_type'] == 'way'
+    assert result[0]['address']['country_code'] == 'br'
+    assert 'North Field' in result[0]['display_name']
+    assert requests[0][0] == 'https://photon.komoot.io/api'
+    assert requests[0][1]['params']['countrycode'] == 'BR'
+    assert providers.geocode('North Field Brazil', 'br') == result
+    assert len(requests) == 1

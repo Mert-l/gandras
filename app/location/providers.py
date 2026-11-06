@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import math
 import socket
 import threading
 import time
@@ -117,27 +118,59 @@ _geocode_lock = threading.Lock()
 _last_geocode = 0.0
 
 
+def _photon_results(data: dict, country_code: str) -> list[dict]:
+    """Normalize Photon GeoJSON to the coordinate contract used by the resolver."""
+    if not isinstance(data, dict) or not isinstance(data.get('features'), list):
+        raise ResearchError('Unexpected geocoder response.')
+    results = []
+    for feature in data['features']:
+        try:
+            p = feature['properties']
+            if p.get('countrycode', '').lower() != country_code.lower():
+                continue
+            if feature['geometry']['type'] != 'Point':
+                continue
+            lon, lat = map(float, feature['geometry']['coordinates'])
+            if not math.isfinite(lat + lon) or not (-84 <= lat <= 84 and -180 <= lon <= 180):
+                continue
+            # Photon extents are west, north, east, south. A point has a zero-size extent.
+            west, north, east, south = p.get('extent', [lon, lat, lon, lat])
+            label = ', '.join(str(p[k]) for k in ('name', 'housenumber', 'street', 'city', 'state', 'country') if p.get(k))
+            results.append({'lat': lat, 'lon': lon, 'name': p.get('name', ''), 'display_name': label,
+                            'address': {'country_code': country_code.lower()},
+                            'boundingbox': [south, north, west, east],
+                            'addresstype': p.get('type') or p.get('osm_value'),
+                            'osm_type': {'N': 'node', 'W': 'way', 'R': 'relation'}.get(p.get('osm_type')),
+                            'osm_id': p.get('osm_id')})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return results
+
+
 def geocode(query: str, country_code: str) -> list[dict]:
     """At most one outbound request/second for the app; durable cache, no autocomplete."""
     global _last_geocode
     s = get_settings()
-    if not s.nominatim_url:
-        raise ResearchError('Set NOMINATIM_URL to your geocoding service to enable coordinate resolution.')
-    key = hashlib.sha256(json.dumps([s.nominatim_url, query, country_code]).encode()).hexdigest()
+    endpoint = s.nominatim_url or s.photon_url
+    if not endpoint:
+        raise ResearchError('Configure PHOTON_URL or NOMINATIM_URL, or enter coordinates manually.')
+    key = hashlib.sha256(json.dumps([endpoint, query, country_code]).encode()).hexdigest()
     path = s.resolve(s.cache_dir) / 'geocoding' / (key + '.json')
     with _geocode_lock:
         if path.is_file() and time.time() - path.stat().st_mtime < 30 * 86400:
             return json.loads(path.read_text(encoding='utf-8'))
         time.sleep(max(0, 1.05 - (time.monotonic() - _last_geocode)))
         try:
-            r = httpx.get(s.nominatim_url.rstrip('/') + '/search', timeout=s.http_timeout_s,
+            params = ({'q': query, 'format': 'jsonv2', 'addressdetails': 1,
+                       'countrycodes': country_code.lower(), 'limit': 4, 'polygon_geojson': 1}
+                      if s.nominatim_url else {'q': query, 'countrycode': country_code.upper(), 'limit': 4})
+            r = httpx.get(endpoint.rstrip('/') + ('/search' if s.nominatim_url else '/api'), timeout=s.http_timeout_s,
                           headers={'User-Agent': s.location_user_agent},
-                          params={'q': query, 'format': 'jsonv2', 'addressdetails': 1,
-                                  'countrycodes': country_code.lower(), 'limit': 4, 'polygon_geojson': 1})
+                          params=params)
             r.raise_for_status()
         finally:
             _last_geocode = time.monotonic()
-        result = r.json()
+        result = r.json() if s.nominatim_url else _photon_results(r.json(), country_code)
         if not isinstance(result, list):
             raise ResearchError('Unexpected geocoder response.')
         path.parent.mkdir(parents=True, exist_ok=True)

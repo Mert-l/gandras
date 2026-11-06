@@ -30,15 +30,17 @@ def resolve_location(st, save, use_llm=True):
     if active:
         active.status, active.finished_at = ('completed' if ok else 'failed'), now()
     parent.status, parent.finished_at = ('completed' if ok else 'failed'), now()
-    parent.summary = ('Geographic location identified — retrieving satellite imagery.' if ok else result['explanation'])
+    parent.summary = (f'Using {result["location"]["name"]} at {result["location"]["latitude"]:.5f}, '
+                      f'{result["location"]["longitude"]:.5f} — retrieving satellite imagery.' if ok else result['explanation'])
     parent.details = {'status': result['status'], 'attempts': len(result['attempts']), 'sources': result['sources']}
     st.current_step = None
     if ok:
         st.location = result['location']
+        st.error = None
         st.progress_percent = max(st.progress_percent, 6)
     else:
         st.status = 'awaiting_location' if result['candidates'] else 'location_unresolved'
         st.error = {'code': 'LOCATION_AMBIGUOUS' if result['candidates'] else 'LOCATION_UNRESOLVED',
                     'message': result['explanation']}
     save()
-    return ok
+    return ok

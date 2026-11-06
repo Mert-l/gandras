@@ -911,12 +911,25 @@
     const errorBox = el("div", { class: "error-box", hidden: true });
     p.appendChild(errorBox);
     if (loc) {
+      if (resolution?.selection === "automatic") {
+        const fillKey = JSON.stringify([d.investigation_id, loc.latitude, loc.longitude, d.temporal_scope]);
+        if (state.locationFillKey !== fillKey) {
+          state.locationFillKey = fillKey;
+          $("c-lat").value = loc.latitude;
+          $("c-lon").value = loc.longitude;
+          $("c-width").value = loc.width_km;
+          $("c-before").value = d.temporal_scope?.before_target || "";
+          $("c-after").value = d.temporal_scope?.after_target || "";
+        }
+      }
       const verified = loc.boundary_status === "verified";
       p.appendChild(el("div", { class: "location-heading" },
         el("h3", { text: loc.name || "Investigation location" }),
         el("span", { class: "chip", text: verified ? "Source-verified boundary" : "Approximate area" })));
       p.appendChild(el("p", { class: "muted", text: fmtNum(loc.latitude, 5) + ", " + fmtNum(loc.longitude, 5) +
         " · " + (verified ? "Analysis clipped to the published polygon." : "Sampling window; project-wide conclusions are not established.") }));
+      p.appendChild(el("p", { class: "hint", text: "Comparison dates: " + (d.temporal_scope?.before_target || "—") +
+        " → " + (d.temporal_scope?.after_target || "—") + ". " + (d.temporal_scope?.date_basis || "") }));
       const mapNode = el("div", { class: "location-map", "aria-label": "Map of the investigation area", role: "region" });
       p.appendChild(mapNode);
       const mapStatus = el("p", { class: "hint", text: "Loading basemap…" });
@@ -975,8 +988,11 @@
     if (sourceLinks?.length) p.appendChild(el("div", { class: "location-sources" },
       Array.from(new Set(sourceLinks)).map((url, i) => safeUrl(url) ? el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Location source " + (i+1) }) : null)));
     if (loc?.geocoder_url) p.appendChild(el("a", { href: safeUrl(loc.geocoder_url), target: "_blank", rel: "noopener noreferrer", text: "Geocoding record · © OpenStreetMap contributors (ODbL)" }));
-    if (TERMINAL.has(d.status)) {
-      const editor = el("details", { class: "custom-loc location-editor" }, el("summary", { text: "Edit location / enter coordinates manually" }));
+    {
+      const idle = TERMINAL.has(d.status);
+      const editor = el("details", { class: "custom-loc location-editor", open: !loc || resolution?.selection === "automatic" },
+        el("summary", { text: loc ? "Selected coordinates and dates / edit location" : "Enter coordinates to continue" }));
+      if (!idle) editor.appendChild(el("p", { class: "hint", text: "Analysis is running with these values. You can correct them and rerun when it finishes." }));
       const fields = {};
       const form = el("form", { class: "grid2" });
       for (const [key, label, value, type] of [
@@ -985,16 +1001,17 @@
         ["before_date", "Before date", d.temporal_scope?.before_target, "date"],
         ["after_date", "After date", d.temporal_scope?.after_target, "date"],
       ]) {
-        fields[key] = el("input", { type, step: type === "number" ? "any" : null, value: value ?? "", required: true });
+        fields[key] = el("input", { type, step: type === "number" ? "any" : null, value: value ?? "", required: true, disabled: !idle });
         form.appendChild(el("label", { class: "field" }, el("span", { class: "label", text: label }), fields[key]));
       }
-      form.appendChild(el("button", { type: "submit", class: "btn-primary", text: "Save location & investigate" }));
+      if (idle) form.appendChild(el("button", { type: "submit", class: "btn-primary", text: "Save location & investigate" }));
       form.addEventListener("submit", event => {
         event.preventDefault(); const custom = {};
         Object.entries(fields).forEach(([key, input]) => { custom[key] = input.type === "number" ? Number(input.value) : input.value; });
         updateLocation(d, { custom }, errorBox);
       });
-      editor.appendChild(form); p.appendChild(editor);
+      editor.appendChild(form);
+      p.insertBefore(editor, p.querySelector(".location-map"));
     }
   }
 

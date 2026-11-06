@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     searxng_url: str = ""
     # Set explicitly to a hosted/self-hosted Nominatim-compatible endpoint.
     nominatim_url: str = ""
+    photon_url: str = "https://photon.komoot.io"
     location_user_agent: str = "Gandras/0.2 (https://github.com/Mert-l/gandras)"
     location_search_attempts: int = 3
     provisional_aoi_width_km: float = 5.0

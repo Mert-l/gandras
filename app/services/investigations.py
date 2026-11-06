@@ -71,7 +71,8 @@ def confirm_location(inv_id: str, candidate_id: str | None, custom: dict | None)
         previous = st.location_resolution or {}
         st.location = location
         st.location_resolution = {**previous, 'status': 'resolved', 'verification_status': location['verification_status'],
-                                  'location': location, 'confirmed_at': database.now(), 'explanation': 'Location selected or corrected by the user.'}
+                                  'location': location, 'selection': 'user', 'confirmed_at': database.now(),
+                                  'explanation': 'Location selected or corrected by the user.'}
         # Satellite products and conclusions cannot carry over to a corrected AOI.
         st.selected_scenes, st.candidates = {}, {}
         st.search_attempts, st.extra_searches = {'before': 0, 'after': 0}, 0

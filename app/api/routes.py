@@ -38,7 +38,7 @@ async def health() -> dict:
             "search_configured": bool(s.tavily_api_key) if s.web_search_provider == "tavily" else
                                  bool(s.brave_search_api_key) if s.web_search_provider == "brave" else
                                  bool(s.searxng_url) if s.web_search_provider == "searxng" else False,
-            "geocoder_configured": bool(s.nominatim_url),
+            "geocoder_configured": bool(s.nominatim_url or s.photon_url),
         },
     }
 

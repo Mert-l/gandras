@@ -4,6 +4,8 @@ A claim can now start an investigation without `case_id` or `custom`. Geographic
 `resolve_location` before claim interpretation and imagery tools. Existing case/manual requests keep
 their previous behavior. Optional dates for automatic discovery come from years in the claim, or a
 three-year baseline through today; actual image acquisition dates remain explicit.
+Once a usable place is found, its coordinates and comparison dates are filled in and analysis
+continues automatically. The geographic panel names the chosen place and shows the editable values.
 
 ## Configure the real providers
 
@@ -12,7 +14,6 @@ Copy `.env.example` to `.env` if needed and configure one search provider:
 ```dotenv
 WEB_SEARCH_PROVIDER=tavily
 TAVILY_API_KEY=your-key
-NOMINATIM_URL=https://your-nominatim-compatible-service
 LOCATION_USER_AGENT=Gandras/0.2 (your-operator-contact-URL)
 ```
 
@@ -20,8 +21,14 @@ Alternatively use `WEB_SEARCH_PROVIDER=brave` with `BRAVE_SEARCH_API_KEY`, or
 `WEB_SEARCH_PROVIDER=searxng` with `SEARXNG_URL` (the instance must enable JSON search).
 The search adapter performs actual HTTP requests; there is no fixture/demo-result fallback.
 The configured Ollama/Qwen model handles entity extraction, query refinement and source assessment.
-Without the model, search configuration or geocoder, discovery explains the failure and offers manual
+Without the model, search configuration or a usable location, discovery explains the failure and offers manual
 entry instead of guessing. Credentials are server-side environment variables, never browser inputs.
+
+Coordinates use [Photon](https://github.com/komoot/photon) by default, with no additional API key.
+`PHOTON_URL` can point to a self-hosted instance. The public demo endpoint allows reasonable request
+volumes and offers no availability guarantee; use your own service for larger deployments.
+Requests are serialized to at most one per second and cached for 30 days. An explicitly configured
+`NOMINATIM_URL` takes precedence over Photon.
 
 Nominatim is configurable and deliberately has no default endpoint. For a small user-triggered deployment,
 the developer may explicitly opt into `https://nominatim.openstreetmap.org` after reviewing the
@@ -39,13 +46,18 @@ Search contracts follow the [Tavily Search API](https://docs.tavily.com/document
 
 - The model proposes geographic names/queries, never coordinate values. Coordinates are read from the
   geocoding response; country/address/site agreement is checked.
-- Up to three search attempts (configurable, hard-capped at five) refine queries and examine alternative
-  sources. A successful automatic choice requires at least two rounds, a unique candidate, matching
-  project/operator/country evidence, exact quotes from fetched documents, and official plus independent
-  reputable sources on different domains. Source credibility remains a model assessment, not a guarantee.
+- Search stops after the first round that yields a source-backed geocoded candidate. Additional
+  searches (default maximum three, hard-capped at five) happen only when nothing usable is found.
+  Location lookup does not try to prove the claim's dates or outcome. Those dates come from the claim
+  and are carried into the satellite comparison.
+- Candidates are ranked by identity evidence, name, specificity, region and country agreement, then
+  citation count. Ties retain provider order. The best match is selected automatically and disclosed;
+  one source is enough to start sampling. A match without independent verification is labeled
+  `approximate_location`, and uncertainty remains visible. Strong identity verification and published
+  boundaries still require the original official/independent-source checks.
 - Search snippets guide discovery but cannot verify the site. Source fetches are bounded and reject
   private/local URLs and private redirect destinations. PDFs and JavaScript-only pages are not currently
-  interpreted; the agent must find accessible supporting sources or request confirmation.
+  interpreted; the agent must find accessible supporting sources or offer manual entry.
 - An OSM polygon is not assumed to be a property boundary. An actual project GeoJSON must be found
   through a retrieved source/link, explicitly tied to the project by official-source evidence, valid,
   within the area limit, and consistent with the geocoded point. Only one Polygon/MultiPolygon is
@@ -56,9 +68,11 @@ Search contracts follow the [Tavily Search API](https://docs.tavily.com/document
   AOI forces a project-wide verdict to **inconclusive**, irrespective of measured change strength.
 - Quoted geographic evidence, retrieval timestamps, query history, uncertainty, boundary provenance
   and geocoding records are persisted and included in the portable report.
-- Ambiguous candidates require user selection. `awaiting_location` and `location_unresolved` are idle
-  recoverable states, not completed investigations. The UI stops polling and exposes candidate/manual
-  actions. It never silently selects among multiple candidates.
+- Multiple candidates do not block analysis. The selected place, coordinates, dates and alternatives
+  are saved in `location_resolution` with `selection: "automatic"`. Users can correct coordinates/dates
+  or select another saved candidate once the investigation is idle. If nothing usable is found,
+  `location_unresolved` stops polling and opens the manual-entry form. Older `awaiting_location`
+  investigations still expose their candidate-selection controls.
 
 ## API
 
@@ -93,9 +107,9 @@ references are cleared and analysis restarts for the new AOI. Geographic researc
 .\.venv\Scripts\python.exe scripts/discover_location.py "Apple reports that Project Alpha in Brazil planted nearly 15 million trees since 2022. Does satellite imagery show vegetation growth consistent with this claim?" --output data/location-research.json
 ```
 
-This is a normal input, not a built-in case. A claim with an unsupported/ambiguous project name should
-return unresolved or candidate confirmation; it must not silently substitute another Apple project.
-Exit status 0 indicates resolved, 2 means confirmation/manual entry is needed. No coordinates or
+This is a normal input, not a built-in case. Ambiguous names may select an approximate location;
+the chosen place and source evidence must be reviewed by the user if incorrect.
+Exit status 0 indicates resolved, 2 means manual entry is needed. No coordinates or
 source URLs are hardcoded for this example.
 
 Unit tests in `tests/test_location.py` use explicitly fictional fixtures and controlled HTTP contracts
