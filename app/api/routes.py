@@ -23,13 +23,22 @@ def err(status: int, code: str, message: str) -> JSONResponse:
 
 @router.get("/health")
 async def health() -> dict:
+    from fastapi.concurrency import run_in_threadpool
+
+    from app.llm import registry
     s = get_settings()
     ollama, stac = await asyncio.gather(check_ollama(s), check_stac(s))
-    ok = ollama["model_available"] and stac["collection_available"]
+    try:
+        default = await run_in_threadpool(registry.get_profile, None)
+        model_label, model_ok = default.label, default.available
+    except KeyError:
+        model_label, model_ok = s.vlm_model, False
+    ok = model_ok and stac["collection_available"]
     return {
         "status": "ok" if ok else "degraded",
-        "model": s.vlm_model,
-        "model_available": ollama["model_available"],
+        "model": model_label,
+        "default_model": registry.default_model_id(),
+        "model_available": model_ok,
         "satellite_provider": "earth-search",
         "stac_collection": s.stac_collection,
         "checks": {"ollama": ollama, "stac": stac},
@@ -41,6 +50,13 @@ async def health() -> dict:
             "geocoder_configured": bool(s.nominatim_url or s.photon_url),
         },
     }
+
+
+@router.get("/models")
+def models(refresh: bool = False) -> dict:
+    """Models the server is configured to use. Never includes base URLs or API keys."""
+    from app.llm import registry
+    return {"default": registry.default_model_id(), "models": [p.public() for p in registry.list_profiles(refresh)]}
 
 
 @router.get("/indicators")

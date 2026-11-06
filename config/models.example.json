@@ -1,0 +1,40 @@
+[
+  {
+    "_comment": "Copy to config/models.json. Local Ollama models are discovered automatically and need no entry. API keys are read from the environment variable named in api_key_env; never put keys in this file."
+  },
+  {
+    "provider": "ollama",
+    "id": "gpu-server",
+    "base_url": "http://gpu-server.internal:11434",
+    "location": "on_premise",
+    "note": "Remote Ollama host: all its installed models are discovered."
+  },
+  {
+    "provider": "openai",
+    "id": "vllm:qwen2.5-vl-7b",
+    "label": "Qwen2.5-VL 7B (vLLM)",
+    "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "base_url": "http://vllm.internal:8000/v1",
+    "location": "on_premise",
+    "vision": true
+  },
+  {
+    "provider": "openai",
+    "id": "openai:gpt-4o-mini",
+    "label": "GPT-4o mini",
+    "model": "gpt-4o-mini",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "location": "cloud",
+    "vision": true
+  },
+  {
+    "provider": "anthropic",
+    "id": "anthropic:claude-sonnet-5-5",
+    "label": "Claude Sonnet 5.5",
+    "model": "claude-sonnet-5-5",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "location": "cloud",
+    "vision": true
+  }
+]

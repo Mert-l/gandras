@@ -26,8 +26,10 @@ def test_health_ok(monkeypatch):
 
 
 def test_health_reports_model_missing(monkeypatch):
+    from app.llm import registry
     _patch(monkeypatch, {"reachable": False, "model_available": False},
            {"reachable": True, "collection_available": True})
+    monkeypatch.setattr(registry, "_ollama_profiles", lambda *a, **k: [])   # Ollama down: nothing discovered
     body = TestClient(app).get("/health").json()
     assert body["status"] == "degraded" and body["model_available"] is False
 

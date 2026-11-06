@@ -17,6 +17,9 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://localhost:11434"
     vlm_model: str = "qwen3.5:4b"
+    # Default model id from the registry, e.g. "ollama:qwen3.5:4b" or an id from MODELS_FILE.
+    default_model: str = ""
+    models_file: str = "config/models.json"
 
     max_agent_steps: int = 8
     max_imagery_retries: int = 2

@@ -18,13 +18,16 @@
         <p class="subtitle">Verify claims about our planet using autonomous AI and satellite evidence.</p>
       </div>
     </div>
-    <div id="health" class="health-pill" title="Backend status">
-      <span class="dot"></span><span class="health-text">Checking backend…</span>
+    <div class="topbar-actions">
+      <button id="toggle-sidebar" class="btn-ghost small sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true">Hide sidebar</button>
+      <div id="health" class="health-pill" title="Backend status">
+        <span class="dot"></span><span class="health-text">Checking backend…</span>
+      </div>
     </div>
   </header>
 
-  <main class="layout">
-    <aside class="sidebar">
+  <main id="layout" class="layout">
+    <aside id="sidebar" class="sidebar" aria-label="New investigation and recent investigations">
       <section class="panel">
         <h2 class="panel-title">New investigation</h2>
         <p class="muted claim-intro">Name the project or place in your claim. Gandras will research its location and check the satellite evidence.</p>
@@ -32,7 +35,7 @@
         <form id="inv-form" novalidate>
           <label class="field">
             <span class="label">What would you like to verify?</span>
-            <textarea id="claim" rows="6" placeholder="e.g. Has vegetation increased around the named restoration project in Brazil since 2022?"></textarea>
+            <textarea id="claim" rows="4" placeholder="e.g. Has vegetation increased around the named restoration project in Brazil since 2022?"></textarea>
           </label>
           <details class="advanced-options">
             <summary>Analysis options &amp; demo cases</summary>
@@ -57,12 +60,19 @@
             </div>
           </details>
 
+          <div id="model-field" class="field model-field" hidden>
+            <label class="label" for="model-select">Model</label>
+            <select id="model-select"></select>
+            <div id="model-meta" class="model-meta"></div>
+            <p id="model-hint" class="hint model-hint" hidden>This model can't read images; visual interpretation will be skipped and the verdict uses measurements only.</p>
+          </div>
+
           <div id="form-error" class="error-box" hidden></div>
           <button id="investigate-btn" class="btn-primary" type="submit">Investigate</button>
         </form>
       </section>
 
-      <section class="panel">
+      <section class="panel recent-panel">
         <div class="panel-head">
           <h2 class="panel-title">Recent investigations</h2>
           <button id="refresh-recent" aria-label="Refresh recent investigations" class="btn-ghost small" type="button" title="Refresh">↻</button>

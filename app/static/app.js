@@ -17,6 +17,14 @@
     pollTimer: null,
     last: null,          // last raw GET /investigations/{id} response
     view: null,          // DOM refs for the current investigation view
+    ui: {},              // per-investigation UI state: tab, slider position, mask/crisp, gallery view
+    models: null,        // GET /models list, or null when unavailable
+    modelDefault: null,
+  };
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* ignore */ } },
   };
 
   // ---------------------------------------------------------------- helpers
@@ -279,6 +287,74 @@
     }
   }
 
+  // ---------------------------------------------------------------- models
+  const MODEL_KEY = "ehr.model";
+  const LOCATION_LABELS = { local: "Local", on_premise: "On-prem", cloud: "Cloud" };
+  const PROVIDER_LABELS = { ollama: "Ollama", openai: "OpenAI", anthropic: "Anthropic" };
+  const locLabel = (x) => LOCATION_LABELS[x] || (x ? humanize(x) : "");
+  const providerLabel = (x) => PROVIDER_LABELS[x] || (x ? capFirst(x) : "");
+
+  async function loadModels() {
+    try {
+      const res = await api("/models");
+      const list = res && Array.isArray(res.models) ? res.models.filter((m) => m && typeof m.id === "string" && m.id) : [];
+      state.models = list.length ? list : null;
+      state.modelDefault = res && typeof res.default === "string" ? res.default : null;
+    } catch (_) {
+      state.models = null;
+    }
+    renderModelSelect();
+  }
+
+  function findModel(id) { return (state.models || []).find((m) => m.id === id) || null; }
+
+  function renderModelSelect() {
+    const field = $("model-field");
+    const sel = clear($("model-select"));
+    if (!state.models) { field.hidden = true; return; }
+    for (const m of state.models) {
+      const bits = [locLabel(m.location)];
+      if (m.vision === false) bits.push("no image input");
+      let text = (m.label || m.model || m.id) + " \u2014 " + bits.filter(Boolean).join(" \u00b7 ");
+      if (!m.available) text += " (" + (m.status || "unavailable") + ")";
+      sel.appendChild(el("option", { value: m.id, text: text, disabled: !m.available, title: m.note || m.status || "" }));
+    }
+    const usable = (id) => { const m = findModel(id); return m && m.available ? id : null; };
+    const firstAvailable = state.models.find((m) => m.available);
+    const pick = usable(store.get(MODEL_KEY)) || usable(state.modelDefault) || (firstAvailable ? firstAvailable.id : "");
+    sel.value = pick;
+    if (!pick) sel.selectedIndex = -1;
+    field.hidden = false;
+    updateModelMeta();
+  }
+
+  function updateModelMeta() {
+    const m = findModel($("model-select").value);
+    const meta = clear($("model-meta"));
+    $("model-hint").hidden = !(m && m.vision === false);
+    if (!m) {
+      meta.appendChild(el("span", { class: "hint", text: "No model is available right now." }));
+      return;
+    }
+    if (m.provider) meta.appendChild(el("span", { class: "chip", text: providerLabel(m.provider) }));
+    if (m.location) meta.appendChild(el("span", { class: "chip loc-" + m.location, text: locLabel(m.location) }));
+    if (m.vision === false) meta.appendChild(el("span", { class: "chip warn", text: "no image input" }));
+    if (m.note) meta.appendChild(el("span", { class: "model-note", text: m.note }));
+  }
+
+  // Model of a stored investigation, as shown in the header ("Qwen 3.5 4B · Local").
+  function investigationModel(d) {
+    const m = d.model && typeof d.model === "object" ? d.model : null;
+    if (m && (m.label || m.model || m.id)) {
+      return { text: [m.label || m.model || m.id, locLabel(m.location)].filter(Boolean).join(" \u00b7 "),
+        title: [providerLabel(m.provider), m.model || m.id, m.vision === false ? "no image input" : ""].filter(Boolean).join(" \u00b7 "),
+        vision: m.vision };
+    }
+    const va = d.visual_analysis;
+    if (va && va.model) return { text: String(va.model), title: "Vision model used for the visual interpretation", vision: true };
+    return null;
+  }
+
   // ---------------------------------------------------------------- form
   function fillCaseSelect() {
     const sel = $("case-select");
@@ -393,6 +469,9 @@
       body.case_id = caseId;
     }
 
+    const modelId = state.models ? $("model-select").value : "";
+    if (modelId && findModel(modelId)?.available) body.options = { model: modelId };
+
     btn.disabled = true;
     btn.textContent = "Submitting…";
     try {
@@ -448,7 +527,8 @@
           recentIndicator(it),
           el("span", { class: "chip s-" + (it.status || ""), text: it.status || "?" }),
           v ? el("span", { class: "chip v-" + v, text: v }) : null,
-          el("span", { text: fmtTime(it.created_at) })));
+          el("span", { text: fmtTime(it.created_at) }),
+          it.model_label ? el("span", { class: "recent-model", text: String(it.model_label) }) : null));
       btn.dataset.id = it.investigation_id;
       list.appendChild(el("li", null, btn));
     }
@@ -458,18 +538,57 @@
     document.querySelectorAll(".recent-item").forEach((b) => b.classList.toggle("current", b.dataset.id === state.currentId));
   }
 
+  // ---------------------------------------------------------------- per-investigation UI state & deep links
+  const TABS = [
+    { id: "overview", label: "Overview" },
+    { id: "evidence", label: "Evidence" },
+    { id: "analysis", label: "Analysis" },
+    { id: "log", label: "Agent log" },
+    { id: "location", label: "Location" },
+    { id: "method", label: "Method & sources" },
+  ];
+  const TAB_IDS = new Set(TABS.map((t) => t.id));
+  const LOCATION_WAIT = new Set(["awaiting_location", "location_unresolved"]);
+
+  function uiFor(id) {
+    if (!state.ui[id]) state.ui[id] = { tab: null, chosen: false, pos: 50, mask: false, crisp: false, gallery: null };
+    return state.ui[id];
+  }
+
+  // #inv=<id>[&tab=<tab>] (a bare #inv=<id> keeps working).
+  function parseHash() {
+    const p = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const tab = p.get("tab");
+    return { id: p.get("inv") || null, tab: tab && TAB_IDS.has(tab) ? tab : null };
+  }
+
+  // Only a tab the user picked goes into the URL; defaults stay implicit so they can still change.
+  function writeHash() {
+    if (!state.currentId) return;
+    const u = uiFor(state.currentId);
+    let h = "#inv=" + encodeURIComponent(state.currentId);
+    if (u.chosen && u.tab) h += "&tab=" + encodeURIComponent(u.tab);
+    if (location.hash !== h) {
+      try { history.replaceState(null, "", h); } catch (_) { /* ignore */ }
+    }
+  }
+
   // ---------------------------------------------------------------- polling
+  function destroyView() {
+    state.view?.stickyObserver?.disconnect();
+    state.view?.mapResizeObserver?.disconnect();
+    state.view?.locationMap?.remove();
+    state.view = null;
+  }
+
   function openInvestigation(id) {
     state.pollGen += 1;
     if (state.pollTimer) clearTimeout(state.pollTimer);
     state.currentId = id;
-    if (location.hash !== "#inv=" + encodeURIComponent(id)) {
-      try { history.replaceState(null, "", "#inv=" + encodeURIComponent(id)); } catch (_) { /* ignore */ }
-    }
+    uiFor(id);
+    writeHash();
     state.last = null;
-    state.view?.mapResizeObserver?.disconnect();
-    state.view?.locationMap?.remove();
-    state.view = null;
+    destroyView();
     $("empty-state").hidden = true;
     const root = clear($("investigation"));
     root.hidden = false;
@@ -486,8 +605,8 @@
     } catch (e) {
       if (gen !== state.pollGen) return;
       if (e.status === 404 || failures >= 8) {
+        destroyView();
         const root = clear($("investigation"));
-        state.view = null;
         root.appendChild(fatalBox("failed", e.info || { code: "ERROR", message: e.message }));
         return;
       }
@@ -504,59 +623,186 @@
     state.pollTimer = setTimeout(() => poll(gen, 0), POLL_MS);
   }
 
-  // ---------------------------------------------------------------- render
+  // ---------------------------------------------------------------- skeleton & tabs
   function fatalBox(status, err) {
     const interrupted = status === "interrupted";
-    return el("div", { class: "fatal" + (interrupted ? " interrupted" : "") },
+    return el("div", { class: "fatal" + (interrupted ? " interrupted" : ""), role: "alert" },
       el("h3", { text: interrupted ? "Investigation interrupted" : "Investigation failed" }),
       el("div", { class: "code", text: (err && err.code) || (interrupted ? "INTERRUPTED" : "UNKNOWN_ERROR") }),
       el("div", { class: "msg", text: (err && err.message) || "No error message was provided." }));
   }
 
-  function buildSkeleton() {
-    state.view?.mapResizeObserver?.disconnect();
-    state.view?.locationMap?.remove();
+  function buildSkeleton(id) {
+    destroyView();
     const root = clear($("investigation"));
-    const v = {};
-    v.header = el("div", { class: "panel" });
-    v.fatal = el("div");
-    v.cache = el("div");
-    v.verdict = el("div");
-    v.location = el("div");
-    v.imagery = el("section", { class: "panel" });
-    v.timelinePanel = el("section", { class: "panel" },
-      el("div", { class: "section-title" }, el("span", { text: "Agent activity" }), v.stepCount = el("span", { class: "muted", text: "" })));
+    const v = { id: id, stepNodes: new Map() };
+
+    // Investigation header (built once; poll updates only text, chips and the progress bar).
+    v.claim = el("h2", { class: "inv-claim" });
+    v.headBadges = el("div", { class: "inv-badges" });
+    v.headChips = el("div", { class: "inv-chips" });
+    v.progressBar = el("div", { class: "progress-bar" });
+    v.progressLabel = el("span", { class: "progress-label" });
+    v.currentStep = el("span", { class: "current-step" });
+    v.progress = el("div", { class: "progress-row" },
+      el("div", { class: "progress", role: "progressbar", "aria-label": "Investigation progress", "aria-valuemin": "0", "aria-valuemax": "100" }, v.progressBar),
+      v.progressLabel, v.currentStep);
+    v.headError = el("div", { class: "head-error", hidden: true });
+    const reportUrl = "/investigations/" + encodeURIComponent(id) + "/report";
+    const actions = el("div", { class: "inv-actions" },
+      el("a", { class: "btn-ghost small", href: reportUrl, target: "_blank", rel: "noopener" }, "Open report"),
+      el("a", { class: "btn-ghost small", href: reportUrl + "?download=true" }, "Download report"),
+      el("button", { type: "button", class: "btn-ghost small", on: { click: downloadReport } }, "Download JSON"));
+
+    v.tablist = el("div", { class: "tabs", role: "tablist", "aria-label": "Investigation sections" });
+    v.tabs = {};
+    v.panels = {};
+    for (const t of TABS) {
+      const tabId = "tab-" + t.id;
+      const panelId = "panel-" + t.id;
+      const btn = el("button", { type: "button", role: "tab", id: tabId, class: "tab", "aria-selected": "false",
+        "aria-controls": panelId, tabindex: "-1" }, el("span", { text: t.label }));
+      if (t.id === "log") {
+        v.liveDot = el("span", { class: "live-dot", hidden: true },
+          el("span", { class: "sr-only", text: "(running)" }));
+        v.logBadge = el("span", { class: "tab-badge", hidden: true });
+        btn.append(v.liveDot, v.logBadge);
+      }
+      btn.dataset.tab = t.id;
+      btn.addEventListener("click", () => chooseTab(t.id, false));
+      btn.addEventListener("keydown", onTabKey);
+      v.tabs[t.id] = btn;
+      v.tablist.appendChild(btn);
+      v.panels[t.id] = el("section", { role: "tabpanel", id: panelId, class: "tabpanel tp-" + t.id,
+        "aria-labelledby": tabId, tabindex: "0", hidden: true });
+    }
+
+    // Overview
+    v.ovAlert = el("div", { class: "ov-alert" });
+    v.ovMedia = el("section", { class: "panel ov-media" });
+    v.ovVerdict = el("div");
+    v.ovCards = el("div");
+    v.ovTriad = el("div");
+    v.panels.overview.append(v.ovAlert, el("div", { class: "ov-grid" }, v.ovMedia,
+      el("div", { class: "ov-side" }, v.ovVerdict, v.ovCards, v.ovTriad)));
+
+    // Evidence
+    v.evGallery = el("section", { class: "panel ev-gallery" });
+    v.evRegions = el("div");
+    v.evCards = el("div");
+    v.evMeasure = el("div");
+    v.panels.evidence.append(el("div", { class: "ev-grid" }, v.evGallery, el("div", { class: "stack" }, v.evCards, v.evRegions)), v.evMeasure);
+
+    // Analysis
+    v.anBreakdown = el("div", { class: "stack" });
+    v.anVisual = el("div");
+    v.anClaim = el("section", { class: "panel" });
+    v.panels.analysis.append(v.anBreakdown, el("div", { class: "an-grid" }, v.anVisual, v.anClaim));
+
+    // Agent log
+    v.stepCount = el("span", { class: "muted", text: "" });
     v.timeline = el("ol", { class: "timeline" });
     v.timelineEmpty = el("div", { class: "muted", text: "Waiting for the agent to start…" });
-    v.timelinePanel.append(v.timelineEmpty, v.timeline);
-    v.results = el("div", { class: "inv" });
-    v.stepNodes = new Map();
-    v.imageryKey = undefined;
-    v.resultsKey = undefined;
-    root.appendChild(el("div", { class: "inv" },
-      v.header, v.fatal, v.cache, v.verdict, v.location,
-      el("div", { class: "two-col" }, v.imagery, v.timelinePanel), v.results));
+    v.logScroll = el("div", { class: "log-scroll" }, v.timelineEmpty, v.timeline);
+    v.panels.log.appendChild(el("section", { class: "panel" },
+      el("div", { class: "section-title" }, el("span", { text: "Agent activity" }), v.stepCount), v.logScroll));
+
+    // Location
+    v.location = el("div");
+    v.panels.location.appendChild(v.location);
+
+    // Method & sources
+    v.mtMethod = el("div");
+    v.mtSources = el("div");
+    v.mtLimits = el("div");
+    v.panels.method.append(el("div", { class: "mt-grid" }, v.mtSources, v.mtLimits), v.mtMethod);
+
+    v.sticky = el("div", { class: "inv-sticky" },
+      el("header", { class: "inv-head" },
+        el("div", { class: "inv-title-row" }, v.claim, v.headBadges), v.headChips, v.progress, v.headError),
+      el("div", { class: "tabs-row" }, v.tablist, actions));
+    const shell = el("div", { class: "inv-shell" }, v.sticky, TABS.map((t) => v.panels[t.id]));
+    root.appendChild(shell);
+    // The Overview hero is sized from the viewport minus the (variable) sticky header height.
+    v.stickyObserver = new ResizeObserver(() => shell.style.setProperty("--sticky-h", v.sticky.offsetHeight + "px"));
+    v.stickyObserver.observe(v.sticky);
     return v;
   }
 
-  function render(d) {
-    if (!state.view || state.view.id !== d.investigation_id) {
-      state.view = buildSkeleton();
-      state.view.id = d.investigation_id;
+  function defaultTab(d, hasLoc) {
+    if (LOCATION_WAIT.has(d.status)) return hasLoc ? "location" : "overview";
+    if (!TERMINAL.has(d.status)) return "log";
+    return "overview";
+  }
+
+  function applyTab(v, tab, focus) {
+    v.activeTab = tab;
+    for (const t of TABS) {
+      const on = t.id === tab;
+      const b = v.tabs[t.id];
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1;
+      v.panels[t.id].hidden = !on;
     }
+    if (focus) v.tabs[tab].focus();
+  }
+
+  function chooseTab(tab, focus) {
+    const v = state.view;
+    if (!v || !TAB_IDS.has(tab) || v.tabs[tab].hidden) return;
+    const u = uiFor(v.id);
+    u.tab = tab;
+    u.chosen = true;
+    writeHash();
+    applyTab(v, tab, focus);
+    // If the user had scrolled down a long tab, bring the new panel's top under the sticky header.
+    const shell = v.sticky.parentNode;
+    const top = shell.getBoundingClientRect().top + window.scrollY - (v.sticky.offsetTop - shell.offsetTop) - 70;
+    if (window.scrollY > top + 1) window.scrollTo(0, Math.max(0, top));
+  }
+
+  function onTabKey(e) {
+    const v = state.view;
+    if (!v) return;
+    const visible = TABS.map((t) => t.id).filter((id) => !v.tabs[id].hidden);
+    const i = visible.indexOf(e.currentTarget.dataset.tab);
+    let next = null;
+    if (e.key === "ArrowRight") next = visible[(i + 1) % visible.length];
+    else if (e.key === "ArrowLeft") next = visible[(i - 1 + visible.length) % visible.length];
+    else if (e.key === "Home") next = visible[0];
+    else if (e.key === "End") next = visible[visible.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    chooseTab(next, true);
+  }
+
+  function renderTabs(v, d) {
+    const u = uiFor(d.investigation_id);
+    const hasLoc = !!(d.location || d.location_resolution);
+    v.tabs.location.hidden = !hasLoc;
+    const steps = Array.isArray(d.steps) ? d.steps.length : 0;
+    v.logBadge.hidden = !steps;
+    v.logBadge.textContent = String(steps);
+    v.logBadge.title = steps + " agent step" + (steps === 1 ? "" : "s");
+    v.liveDot.hidden = TERMINAL.has(d.status);
+    if (!u.chosen) u.tab = defaultTab(d, hasLoc);
+    let tab = u.tab;
+    if (!TAB_IDS.has(tab) || v.tabs[tab].hidden) tab = "overview";
+    if (v.activeTab !== tab) applyTab(v, tab, false);
+  }
+
+  // ---------------------------------------------------------------- render
+  function render(d) {
+    if (!state.view || state.view.id !== d.investigation_id) state.view = buildSkeleton(d.investigation_id);
     const v = state.view;
     renderHeader(v, d);
+    renderTabs(v, d);
+
     const locationKey = JSON.stringify([d.location, d.location_resolution, d.status]);
     if (locationKey !== v.locationKey) {
       v.locationKey = locationKey;
       renderLocation(v, d);
     }
-
-    clear(v.fatal);
-    if (d.status === "failed" || d.status === "interrupted") v.fatal.appendChild(fatalBox(d.status, d.error));
-
-    clear(v.cache);
-    if (d.from_cache) v.cache.appendChild(el("div", { class: "note cache", text: "Replayed from cache — imagery acquired on the dates shown" }));
 
     renderTimeline(v, d);
 
@@ -567,11 +813,14 @@
     }
     updateLegends(v, d);
 
-    const resKey = JSON.stringify([d.status, d.verdict, d.headline, d.measurements, d.indicator_info, d.visual_analysis, d.methodology, d.sources, d.limitations]);
+    const resKey = JSON.stringify([d.status, d.error, d.verdict, d.headline, d.measurements, d.indicator_info, d.claim_interpretation,
+      d.visual_analysis, d.model, d.methodology, d.sources, d.limitations, d.location_resolution && d.location_resolution.explanation]);
     if (resKey !== v.resultsKey) {
       v.resultsKey = resKey;
-      renderVerdict(v, d);
-      renderResults(v, d);
+      renderOverview(v, d);
+      renderEvidenceTables(v, d);
+      renderAnalysis(v, d);
+      renderMethod(v, d);
     }
   }
 
@@ -627,32 +876,75 @@
     return wrap;
   }
 
+  function statusText(status) {
+    return status === "awaiting_location" ? "Confirm location" : status === "location_unresolved" ? "Location needed" : status;
+  }
+
+  function metaItem(k, value, opts) {
+    opts = opts || {};
+    return el("span", { class: "meta-item" + (opts.cls ? " " + opts.cls : ""), title: opts.title || null },
+      el("span", { class: "meta-k", text: k }), value instanceof Node ? value : el("span", { class: "meta-v", text: value }));
+  }
+
   function renderHeader(v, d) {
-    clear(v.header);
-    const loc = d.location;
-    const ts = d.temporal_scope;
     const status = d.status || "queued";
+    const running = !TERMINAL.has(status);
+    const claim = d.claim || "(no claim text)";
+    if (v.claim.textContent !== claim) { v.claim.textContent = claim; v.claim.title = claim; }
+
     const pct = Math.max(0, Math.min(100, Number(d.progress_percent) || (status === "completed" ? 100 : 0)));
+    v.progress.hidden = !running;
+    v.progressBar.style.width = pct + "%";
+    v.progressBar.parentNode.setAttribute("aria-valuenow", String(pct));
+    v.progressLabel.textContent = pct + "%";
+    v.currentStep.textContent = d.current_step && running ? "Now: " + humanize(d.current_step) : "";
 
-    const reportUrl = "/investigations/" + encodeURIComponent(d.investigation_id) + "/report";
-    const dl = el("a", { class: "btn-ghost", href: reportUrl + "?download=true" }, "Download evidence report");
-    const report = el("a", { class: "btn-ghost", href: reportUrl, target: "_blank", rel: "noopener" }, "Open evidence report");
-    v.header.appendChild(el("div", { class: "inv-header" },
-      el("div", null,
-        el("div", { class: "inv-claim", text: d.claim || "(no claim text)" }),
-        el("div", { class: "inv-meta" },
-          loc ? el("span", { text: (loc.name ? loc.name + " · " : "") + fmtNum(loc.latitude, 4) + ", " + fmtNum(loc.longitude, 4) + " · " + fmtNum(loc.width_km, 1) + " km" }) : null,
-          ts ? el("span", { text: "Before ≈ " + (ts.before_target || "?") + " · After ≈ " + (ts.after_target || "?") }) : null,
-          el("span", { class: "mono", text: d.investigation_id }))),
-      el("div", { class: "inv-actions" }, el("span", { class: "chip s-" + status, text: status === "awaiting_location" ? "Confirm location" : status === "location_unresolved" ? "Location needed" : status }), report, dl,
-        el("button", { type: "button", class: "btn-ghost", on: { click: downloadReport } }, "Raw JSON"))));
-    v.header.appendChild(renderIndicatorBlock(d));
+    // Errors and blocked states stay visible on every tab.
+    let errText = null, errCls = "";
+    if (status === "failed" || status === "interrupted") {
+      const e = d.error || {};
+      errText = (status === "interrupted" ? "Interrupted" : "Failed") + " · " + (e.code || "UNKNOWN_ERROR") + ": " + (e.message || "No error message was provided.");
+      errCls = status === "interrupted" ? " warn" : "";
+    } else if (LOCATION_WAIT.has(status)) {
+      errText = status === "awaiting_location" ? "Confirm the location to continue — no satellite conclusion has been drawn yet." :
+        "The location could not be determined automatically. Pick a candidate or enter coordinates in the Location tab.";
+      errCls = " warn";
+    }
+    v.headError.hidden = !errText;
+    v.headError.className = "head-error" + errCls;
+    v.headError.textContent = errText || "";
 
-    v.header.appendChild(el("div", { style: "margin-top:12px" },
-      el("div", { class: "progress-row" },
-        el("div", { class: "progress" }, el("div", { class: "progress-bar" + (status === "failed" ? " failed" : status === "interrupted" ? " interrupted" : ""), style: "width:" + pct + "%" })),
-        el("span", { class: "progress-label", text: pct + "%" })),
-      d.current_step && !TERMINAL.has(status) ? el("div", { class: "current-step", text: "Now: " + humanize(d.current_step) }) : null));
+    const st = indicatorState(d);
+    const model = investigationModel(d);
+    const key = JSON.stringify([status, d.verdict && d.verdict.status, d.verdict && d.verdict.confidence, st, d.location, d.temporal_scope,
+      model, d.from_cache, d.investigation_id, state.indicators.length]);
+    if (key === v.headKey) return;
+    v.headKey = key;
+    const badges = clear(v.headBadges);
+    badges.appendChild(el("span", { class: "chip big s-" + status, title: "Status", text: statusText(status) }));
+    const vd = d.verdict;
+    if (vd && vd.status) {
+      badges.appendChild(el("span", { class: "chip big v-" + vd.status, title: "Verdict",
+        text: vd.status + (vd.confidence ? " · " + vd.confidence + " confidence" : "") }));
+    }
+    if (d.from_cache) badges.appendChild(el("span", { class: "chip cache", title: "Replayed from cache — imagery acquired on the dates shown", text: "cached replay" }));
+    const box = clear(v.headChips);
+    if (st.resolved) {
+      box.appendChild(metaItem("Indicator", (st.name || st.resolved) + (st.requested === "auto" ? " (auto)" : ""),
+        { cls: st.isFallback ? "fallback" : "", title: st.isFallback ? "Fallback indicator: general surface change" : null }));
+    } else if (!TERMINAL.has(status)) {
+      box.appendChild(metaItem("Indicator", el("span", { class: "meta-v muted" }, el("span", { class: "spinner inline" }), " detecting…")));
+    }
+    const loc = d.location;
+    if (loc) {
+      const coords = fmtNum(loc.latitude, 4) + ", " + fmtNum(loc.longitude, 4) + " · " + fmtNum(loc.width_km, 1) + " km";
+      box.appendChild(metaItem("Location", loc.name || coords, { title: coords }));
+    }
+    const ts = d.temporal_scope;
+    if (ts && (ts.before_target || ts.after_target)) box.appendChild(metaItem("Dates", (ts.before_target || "?") + " → " + (ts.after_target || "?"),
+      { title: "Target dates (not acquisition dates). " + (ts.date_basis || "") }));
+    if (model) box.appendChild(metaItem("Model", model.text, { title: model.title }));
+    box.appendChild(el("span", { class: "mono inv-id", title: "Investigation id", text: d.investigation_id }));
   }
 
   function downloadReport() {
@@ -669,6 +961,9 @@
   // ---------------------------------------------------------------- timeline
   function renderTimeline(v, d) {
     const steps = Array.isArray(d.steps) ? d.steps.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0)) : [];
+    const sc = v.logScroll;
+    const pinned = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
+    const before = v.timeline.children.length;
     v.timelineEmpty.hidden = steps.length > 0;
     v.timelineEmpty.textContent = TERMINAL.has(d.status) ? "No steps were recorded." : "Waiting for the agent to start…";
     v.stepCount.textContent = steps.length ? steps.length + " step" + (steps.length === 1 ? "" : "s") : "";
@@ -688,6 +983,8 @@
     for (const [key, node] of v.stepNodes) {
       if (!seen.has(key)) { node.li.remove(); v.stepNodes.delete(key); }
     }
+    // Follow new steps while running, unless the user scrolled up to read.
+    if (!TERMINAL.has(d.status) && pinned && v.timeline.children.length > before) sc.scrollTop = sc.scrollHeight;
   }
 
   function createStepNode() {
@@ -762,67 +1059,98 @@
     for (const it of items) {
       const sw = el("span", { class: "swatch", title: it.color });
       if (it.css) sw.style.background = it.css;
-      node.appendChild(el("span", { class: "legend-item" }, sw, it.text));
+      node.appendChild(el("span", { class: "legend-item", title: it.text }, sw, el("span", { class: "legend-text", text: it.text })));
     }
   }
 
   function updateLegends(v, d) {
-    v.imagery.querySelectorAll(".overlay-legend").forEach((n) => fillLegend(n, d));
+    const sig = JSON.stringify(d.measurements && d.measurements.overlay_legend);
+    if (sig === v.legendSig) return;
+    v.legendSig = sig;
+    for (const box of [v.ovMedia, v.evGallery]) box.querySelectorAll(".overlay-legend").forEach((n) => fillLegend(n, d));
   }
 
+  function imageryReady(img) { return img && img.before && img.after; }
+
   function renderImagery(v, d) {
-    const box = clear(v.imagery);
+    v.legendSig = undefined;
     const img = d.imagery;
-    const tabsBar = el("div", { class: "imagery-tabs" });
-    box.appendChild(el("div", { class: "section-title" }, el("span", { text: "Satellite evidence" }), tabsBar));
-    if (!img || !img.before || !img.after) {
-      box.appendChild(el("div", { class: "img-missing", text: TERMINAL.has(d.status) ? "No imagery was produced for this investigation." : "Imagery will appear once the agent has retrieved it." }));
+    const missingText = TERMINAL.has(d.status) ? "No imagery was produced for this investigation." : "Imagery will appear once the agent has retrieved it.";
+
+    // Overview hero: before/after slider.
+    const box = clear(v.ovMedia);
+    const head = el("div", { class: "section-title" }, el("span", { text: "Satellite evidence · before / after" }));
+    box.appendChild(head);
+    if (!imageryReady(img)) {
+      box.appendChild(el("div", { class: "img-missing hero-missing" + (TERMINAL.has(d.status) ? " short" : ""), text: missingText }));
+    } else {
+      head.appendChild(el("button", { type: "button", class: "link-btn", on: { click: () => chooseTab("evidence", false) } }, "More imagery →"));
+      box.appendChild(buildCompare(img, uiFor(d.investigation_id)).root);
+    }
+
+    // Evidence tab: gallery of every image product.
+    renderGallery(v, d, missingText);
+  }
+
+  function renderGallery(v, d, missingText) {
+    const box = clear(v.evGallery);
+    const img = d.imagery;
+    const bar = el("div", { class: "imagery-tabs", role: "group", "aria-label": "Image product" });
+    box.appendChild(el("div", { class: "section-title" }, el("span", { text: "Imagery gallery" }), bar));
+    if (!imageryReady(img)) {
+      box.appendChild(el("div", { class: "img-missing hero-missing" + (TERMINAL.has(d.status) ? " short" : ""), text: missingText }));
       return;
     }
-    const stage = el("div");
-    box.appendChild(stage);
-
-    const views = [{ key: "compare", label: "Before / After" }];
-    if (safeUrl(img.overlay_url)) views.push({ key: "overlay", label: "Change overlay", url: img.overlay_url });
+    const u = uiFor(d.investigation_id);
+    const beforeDate = fmtDate(img.before.acquired_at || img.before.date);
+    const afterDate = fmtDate(img.after.acquired_at || img.after.date);
+    const views = [];
+    if (safeUrl(img.overlay_url)) views.push({ key: "overlay", label: "Change overlay", url: img.overlay_url, legend: true });
     if (img.extra && typeof img.extra === "object") {
       for (const [label, url] of Object.entries(img.extra)) if (safeUrl(url)) views.push({ key: "x:" + label, label: humanize(label), url: url });
     }
-    const crisp = { on: false };
-    const compare = buildCompare(img, crisp);
-    let current = "compare";
-    const buttons = views.map((vw) => el("button", {
-      type: "button", class: "btn-ghost small" + (vw.key === current ? " active" : ""),
-      on: { click: () => show(vw.key) },
-    }, vw.label));
-    if (views.length > 1) buttons.forEach((b) => tabsBar.appendChild(b));
-
+    if (safeUrl(img.mask_url)) views.push({ key: "mask", label: "Change mask", url: img.mask_url, legend: true });
+    if (safeUrl(img.before.url)) views.push({ key: "before", label: "Before · " + beforeDate, url: img.before.url });
+    if (safeUrl(img.after.url)) views.push({ key: "after", label: "After · " + afterDate, url: img.after.url });
+    const stage = el("div", { class: "gallery-stage" });
+    box.appendChild(stage);
+    const buttons = views.map((vw) => el("button", { type: "button", class: "btn-ghost small", "aria-pressed": "false",
+      on: { click: () => show(vw.key) } }, vw.label));
+    buttons.forEach((b) => bar.appendChild(b));
     function show(key) {
-      current = key;
-      buttons.forEach((b, i) => b.classList.toggle("active", views[i].key === key));
+      const vw = views.find((x) => x.key === key) || views[0];
+      if (!vw) return;
+      u.gallery = vw.key;
+      buttons.forEach((b, i) => { const on = views[i].key === vw.key; b.classList.toggle("active", on); b.setAttribute("aria-pressed", on ? "true" : "false"); });
       clear(stage);
-      if (key === "compare") { stage.appendChild(compare.root); return; }
-      const vw = views.find((x) => x.key === key);
-      const im = el("img", { src: safeUrl(vw.url), alt: vw.label, loading: "lazy" });
+      const src = safeUrl(vw.url);
+      const im = el("img", { src: src, alt: vw.label, loading: "lazy" });
       im.addEventListener("error", () => im.replaceWith(el("div", { class: "img-missing", text: "Image could not be loaded: " + vw.url })));
-      const legend = vw.key === "overlay" ? el("div", { class: "overlay-legend" }) : null;
+      const legend = vw.legend ? el("div", { class: "overlay-legend" }) : null;
       if (legend) fillLegend(legend, state.last);
-      stage.appendChild(el("div", { class: "gallery-view" + (crisp.on ? " crisp" : "") }, im,
-        el("div", { class: "gallery-caption", text: vw.label }), legend));
+      stage.appendChild(el("div", { class: "gallery-view" + (u.crisp ? " crisp" : "") }, im,
+        el("div", { class: "gallery-caption" }, el("span", { text: vw.label }),
+          el("a", { href: src, target: "_blank", rel: "noopener", text: "Open full size ↗" })), legend));
     }
-    show("compare");
+    if (views.length) show(u.gallery || views[0].key);
+    else stage.appendChild(el("div", { class: "img-missing", text: "No image products." }));
+    box.appendChild(el("div", { class: "scene-ids" },
+      el("div", { text: "Before: " + (img.before.scene_id || "—") + " · " + fmtDateTime(img.before.acquired_at || img.before.date) }),
+      el("div", { text: "After: " + (img.after.scene_id || "—") + " · " + fmtDateTime(img.after.acquired_at || img.after.date) })));
   }
 
-  function buildCompare(img, crisp) {
+  // Before/after slider. Position, mask and crisp state live in `u` so a rebuild (new poll data) restores them.
+  function buildCompare(img, u) {
     const beforeDate = fmtDate(img.before.acquired_at || img.before.date);
     const afterDate = fmtDate(img.after.acquired_at || img.after.date);
     const imBefore = el("img", { class: "layer-before", src: safeUrl(img.before.url), alt: "Before, acquired " + beforeDate, draggable: "false" });
     const imAfter = el("img", { class: "layer-after", src: safeUrl(img.after.url), alt: "After, acquired " + afterDate, draggable: "false" });
     const maskUrl = safeUrl(img.mask_url);
-    const imMask = maskUrl ? el("img", { class: "layer-mask", src: maskUrl, alt: "Change mask", draggable: "false", hidden: true }) : null;
+    const imMask = maskUrl ? el("img", { class: "layer-mask", src: maskUrl, alt: "Change mask", draggable: "false", hidden: !u.mask }) : null;
     const knob = el("div", { class: "compare-knob", text: "⟷" });
     const handle = el("div", { class: "compare-handle", tabindex: "0", role: "slider", "aria-label": "Before/after divider",
       "aria-valuemin": "0", "aria-valuemax": "100" }, knob);
-    const container = el("div", { class: "compare" }, imAfter, imBefore, imMask,
+    const container = el("div", { class: "compare" + (u.crisp ? " crisp" : "") }, imAfter, imBefore, imMask,
       el("div", { class: "compare-label left" }, el("b", { text: "BEFORE" }), beforeDate),
       el("div", { class: "compare-label right" }, el("b", { text: "AFTER" }), afterDate),
       handle);
@@ -830,12 +1158,13 @@
     let pos = 50;
     function setPos(p) {
       pos = Math.max(0, Math.min(100, p));
+      u.pos = pos;
       imBefore.style.clipPath = "inset(0 " + (100 - pos) + "% 0 0)";
       handle.style.left = pos + "%";
       handle.setAttribute("aria-valuenow", String(Math.round(pos)));
       handle.setAttribute("aria-valuetext", Math.round(pos) + "% before");
     }
-    setPos(50);
+    setPos(typeof u.pos === "number" ? u.pos : 50);
 
     function fromEvent(e) {
       const r = container.getBoundingClientRect();
@@ -867,31 +1196,39 @@
     const controls = el("div", { class: "imagery-controls" });
     if (imMask) {
       const cb = el("input", { type: "checkbox" });
-      cb.addEventListener("change", () => { imMask.hidden = !cb.checked; });
+      cb.checked = !!u.mask;
+      cb.addEventListener("change", () => { u.mask = cb.checked; imMask.hidden = !cb.checked; });
       controls.appendChild(el("label", null, cb, "Show change mask"));
-      controls.appendChild(el("span", { class: "overlay-legend", hidden: true }));
     } else {
       controls.appendChild(el("span", { class: "muted", text: "No change mask available" }));
     }
     const crispCb = el("input", { type: "checkbox" });
-    crispCb.addEventListener("change", () => { crisp.on = crispCb.checked; container.classList.toggle("crisp", crisp.on); });
+    crispCb.checked = !!u.crisp;
+    crispCb.addEventListener("change", () => {
+      u.crisp = crispCb.checked;
+      container.classList.toggle("crisp", u.crisp);
+      document.querySelectorAll(".gallery-view").forEach((g) => g.classList.toggle("crisp", u.crisp));
+    });
     controls.appendChild(el("label", null, crispCb, "Pixel-crisp"));
-    controls.appendChild(el("span", { class: "muted", text: "Drag the divider or use ←/→ keys" }));
+    controls.appendChild(el("span", { class: "muted drag-hint", text: "Drag the divider or use ←/→ keys" }));
+    const legend = imMask ? el("div", { class: "overlay-legend", hidden: true }) : null;
 
-    const sceneIds = el("div", { class: "scene-ids" },
-      el("div", { text: "Before: " + (img.before.scene_id || "—") + " · " + fmtDateTime(img.before.acquired_at || img.before.date) }),
-      el("div", { text: "After: " + (img.after.scene_id || "—") + " · " + fmtDateTime(img.after.acquired_at || img.after.date) }));
-
-    return { root: el("div", null, container, controls, sceneIds) };
+    return { root: el("div", { class: "compare-wrap" }, container, controls, legend) };
   }
 
+  // ---------------------------------------------------------------- location
   async function updateLocation(d, payload, errorBox) {
     errorBox.hidden = true;
     try {
       await api("/investigations/" + encodeURIComponent(d.investigation_id) + "/location", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
+      // The rerun starts fresh: let the default tab (Agent log while running) take over again.
+      const u = uiFor(d.investigation_id);
+      u.chosen = false;
+      u.tab = null;
       openInvestigation(d.investigation_id);
+      loadRecent();
     } catch (e) { showErrorBox(errorBox, e.info || { code: "ERROR", message: e.message }); }
   }
 
@@ -904,12 +1241,15 @@
     const p = panel("Geographic evidence");
     v.location.appendChild(p);
     if (!loc && !resolution) {
-      p.appendChild(el("p", { class: "muted", text: "Researching the location named in your claim. Follow the source checks in Activity." }));
+      p.appendChild(el("p", { class: "muted", text: "Researching the location named in your claim. Follow the source checks in the Agent log." }));
       return;
     }
-    if (resolution?.explanation) p.appendChild(el("p", { class: "muted", text: resolution.explanation }));
+    const info = el("div", { class: "loc-info" });
+    const grid = el("div", { class: "loc-grid" + (loc ? "" : " single") }, info);
+    p.appendChild(grid);
+    if (resolution?.explanation) info.appendChild(el("p", { class: "muted", text: resolution.explanation }));
     const errorBox = el("div", { class: "error-box", hidden: true });
-    p.appendChild(errorBox);
+    info.appendChild(errorBox);
     if (loc) {
       if (resolution?.selection === "automatic") {
         const fillKey = JSON.stringify([d.investigation_id, loc.latitude, loc.longitude, d.temporal_scope]);
@@ -922,20 +1262,31 @@
           $("c-after").value = d.temporal_scope?.after_target || "";
         }
       }
+      // Label the area by where it came from: only an automatically discovered point is "approximate";
+      // demo cases and typed coordinates are fixed study areas whose verdict is not constrained.
       const verified = loc.boundary_status === "verified";
-      p.appendChild(el("div", { class: "location-heading" },
+      const res = d.location_resolution;
+      const origin = verified ? ["Source-verified boundary", "Analysis clipped to the published polygon."]
+        : !res ? ["Fixed study area", (d.case_id ? "Square study area defined by the demo case" : "Square study area you entered") +
+                  (loc.width_km ? " (" + fmtNum(loc.width_km, 1) + " km wide)." : ".")]
+        : res.selection === "user" ? ["User-confirmed sampling area", "Sampling window you confirmed or entered; the property boundary is not verified."]
+        : ["Approximate area (auto-discovered)", "Sampling window around a discovered point; project-wide conclusions are not established."];
+      info.appendChild(el("div", { class: "location-heading" },
         el("h3", { text: loc.name || "Investigation location" }),
-        el("span", { class: "chip", text: verified ? "Source-verified boundary" : "Approximate area" })));
-      p.appendChild(el("p", { class: "muted", text: fmtNum(loc.latitude, 5) + ", " + fmtNum(loc.longitude, 5) +
-        " · " + (verified ? "Analysis clipped to the published polygon." : "Sampling window; project-wide conclusions are not established.") }));
-      p.appendChild(el("p", { class: "hint", text: "Comparison dates: " + (d.temporal_scope?.before_target || "—") +
+        el("span", { class: "chip", text: origin[0] })));
+      info.appendChild(el("p", { class: "muted", text: fmtNum(loc.latitude, 5) + ", " + fmtNum(loc.longitude, 5) + " · " + origin[1] }));
+      info.appendChild(el("p", { class: "hint", text: "Comparison dates: " + (d.temporal_scope?.before_target || "—") +
         " → " + (d.temporal_scope?.after_target || "—") + ". " + (d.temporal_scope?.date_basis || "") }));
+      (loc.uncertainty || []).forEach(t => info.appendChild(el("p", { class: "hint", text: t })));
+
+      const mapCol = el("div", { class: "loc-map-col" });
+      grid.appendChild(mapCol);
       const mapNode = el("div", { class: "location-map", "aria-label": "Map of the investigation area", role: "region" });
-      p.appendChild(mapNode);
+      mapCol.appendChild(mapNode);
       const mapStatus = el("p", { class: "hint", text: "Loading basemap…" });
-      p.appendChild(mapStatus);
+      mapCol.appendChild(mapStatus);
       const mapUrl = "https://www.openstreetmap.org/?mlat=" + encodeURIComponent(loc.latitude) + "&mlon=" + encodeURIComponent(loc.longitude) + "#map=13/" + loc.latitude + "/" + loc.longitude;
-      p.appendChild(el("a", { href: mapUrl, target: "_blank", rel: "noopener noreferrer", text: "View location on OpenStreetMap" }));
+      mapCol.appendChild(el("a", { href: mapUrl, target: "_blank", rel: "noopener noreferrer", text: "View location on OpenStreetMap" }));
       if (window.L) {
         // Defer until the panel is attached. Leaflet receives DOM nodes for any user text.
         requestAnimationFrame(() => {
@@ -956,6 +1307,7 @@
             const b = loc.bbox || [loc.longitude-dx, loc.latitude-dy, loc.longitude+dx, loc.latitude+dy];
             layer = L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: "#986b24", dashArray: "5 5", weight: 2 }).addTo(map);
           }
+          // The Location tab may be hidden: size and fit the map the first time it becomes visible.
           let fitted = false;
           const resize = () => {
             if (!mapNode.getBoundingClientRect().width) return;
@@ -970,24 +1322,7 @@
         mapStatus.hidden = true;
         mapNode.appendChild(el("p", { class: "muted", text: "Map preview unavailable. Use the map link below." }));
       }
-      (loc.uncertainty || []).forEach(t => p.appendChild(el("p", { class: "hint", text: t })));
     }
-    if (!loc && resolution?.candidates?.length) {
-      p.appendChild(el("h3", { text: "Confirm the intended location" }));
-      resolution.candidates.forEach(c => {
-        const card = el("div", { class: "location-candidate" },
-          el("strong", { text: c.name }), el("p", { class: "muted", text: [c.region, c.country, c.geocoder_label].filter(Boolean).join(" · ") }),
-          el("p", { class: "hint", text: c.explanation || "This location needs your confirmation." }),
-          el("button", { class: "btn-ghost", type: "button", text: "Investigate this location",
-            on: { click: () => updateLocation(d, { candidate_id: c.id }, errorBox) } }));
-        (c.evidence_urls || []).forEach(url => { if (safeUrl(url)) card.appendChild(el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Supporting source" })); });
-        p.appendChild(card);
-      });
-    }
-    const sourceLinks = loc?.evidence_urls || (resolution?.sources || []).map(s => s.url);
-    if (sourceLinks?.length) p.appendChild(el("div", { class: "location-sources" },
-      Array.from(new Set(sourceLinks)).map((url, i) => safeUrl(url) ? el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Location source " + (i+1) }) : null)));
-    if (loc?.geocoder_url) p.appendChild(el("a", { href: safeUrl(loc.geocoder_url), target: "_blank", rel: "noopener noreferrer", text: "Geocoding record · © OpenStreetMap contributors (ODbL)" }));
     {
       const idle = TERMINAL.has(d.status);
       const editor = el("details", { class: "custom-loc location-editor", open: !loc || resolution?.selection === "automatic" },
@@ -1011,30 +1346,29 @@
         updateLocation(d, { custom }, errorBox);
       });
       editor.appendChild(form);
-      p.insertBefore(editor, p.querySelector(".location-map"));
+      info.appendChild(editor);
     }
+    if (!loc && resolution?.candidates?.length) {
+      info.appendChild(el("h3", { class: "loc-cand-title", text: "Confirm the intended location" }));
+      const cands = el("div", { class: "loc-candidates" });
+      resolution.candidates.forEach(c => {
+        const card = el("div", { class: "location-candidate" },
+          el("strong", { text: c.name }), el("p", { class: "muted", text: [c.region, c.country, c.geocoder_label].filter(Boolean).join(" · ") }),
+          el("p", { class: "hint", text: c.explanation || "This location needs your confirmation." }),
+          el("button", { class: "btn-ghost", type: "button", text: "Investigate this location",
+            on: { click: () => updateLocation(d, { candidate_id: c.id }, errorBox) } }));
+        (c.evidence_urls || []).forEach(url => { if (safeUrl(url)) card.appendChild(el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Supporting source" })); });
+        cands.appendChild(card);
+      });
+      info.appendChild(cands);
+    }
+    const sourceLinks = loc?.evidence_urls || (resolution?.sources || []).map(s => s.url);
+    if (sourceLinks?.length) info.appendChild(el("div", { class: "location-sources" },
+      Array.from(new Set(sourceLinks)).map((url, i) => safeUrl(url) ? el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Location source " + (i+1) }) : null)));
+    if (loc?.geocoder_url && safeUrl(loc.geocoder_url)) info.appendChild(el("a", { href: safeUrl(loc.geocoder_url), target: "_blank", rel: "noopener noreferrer", text: "Geocoding record · © OpenStreetMap contributors (ODbL)" }));
   }
 
-  // ---------------------------------------------------------------- verdict & results
-  function renderVerdict(v, d) {
-    clear(v.verdict);
-    const vd = d.verdict;
-    if (!vd) {
-      const waiting = ["awaiting_location", "location_unresolved"].includes(d.status);
-      v.verdict.appendChild(panel(waiting ? "Location needed before analysis" : "Assessment pending", el("p", { class: "muted", text: waiting ?
-        "Confirm a candidate or enter a location above to continue. No satellite conclusion has been drawn." :
-        "The verdict will appear after the evidence has been assessed. Follow the investigation in Activity." })));
-      return;
-    }
-    const status = vd.status || "inconclusive";
-    v.verdict.appendChild(el("div", { class: "verdict " + status },
-      el("div", { class: "verdict-kicker", text: "Verdict" }),
-      el("div", { class: "verdict-top" },
-        el("span", { class: "verdict-label", text: status }),
-        vd.confidence ? el("span", { class: "chip cert-" + vd.confidence, text: vd.confidence + " confidence" }) : null),
-      vd.summary ? el("div", { class: "verdict-summary", text: vd.summary }) : null));
-  }
-
+  // ---------------------------------------------------------------- shared result pieces
   function list(items, emptyText) {
     if (!Array.isArray(items) || !items.length) return el("div", { class: "muted", text: emptyText || "None." });
     return el("ul", { class: "plain" }, items.map((t) => el("li", { text: typeof t === "string" ? t : JSON.stringify(t) })));
@@ -1061,64 +1395,129 @@
     for (const [k, val] of Object.entries(obj || {})) {
       const key = prefix ? prefix + "." + k : k;
       if (val && typeof val === "object" && !Array.isArray(val)) kvTable(val, key, rows);
-      else rows.push(el("tr", null, el("td", { text: key }), el("td", { text: fmtValue(val) })));
+      else rows.push(el("tr", null, el("td", { text: key }), kvCell(fmtValue(val))));
     }
     return rows;
   }
 
-  function renderResults(v, d) {
-    const R = clear(v.results);
-    const vd = d.verdict;
+  // Long values (rule texts, attempt logs) collapse to a one-line preview so tables stay scannable.
+  function kvCell(text) {
+    if (text.length <= 160) return el("td", { text: text });
+    return el("td", null, el("details", { class: "kv-long" },
+      el("summary", { text: text.slice(0, 90).trim() + "\u2026" }), el("div", { class: "kv-full", text: text })));
+  }
+
+  function kvColumns(rows) {
+    const half = Math.ceil(rows.length / 2);
+    return el("div", { class: "kv-cols" },
+      el("table", { class: "kv" }, el("tbody", null, rows.slice(0, half))),
+      rows.length > 1 ? el("table", { class: "kv" }, el("tbody", null, rows.slice(half))) : null);
+  }
+
+  // Headline + area/fraction cards. `compact` drops cards that repeat the headline value (Overview).
+  function measurementCards(d, compact) {
     const m = d.measurements && typeof d.measurements === "object" ? d.measurements : null;
     const evLabel = indicatorState(d).evidenceLabel;
-
-    // headline + key measurements
-    const cards = el("div", { class: "cards" });
+    const cards = [];
+    const rest = {};
+    const hv = d.headline ? d.headline.value : undefined;
     if (d.headline) {
-      const hv = d.headline.value;
-      cards.appendChild(el("div", { class: "card headline" },
+      cards.push(el("div", { class: "card headline" },
         el("div", { class: "k", text: d.headline.label || "Headline" }),
         el("div", { class: "v" }, typeof hv === "number" ? fmtNum(hv) : fmtValue(hv), el("span", { class: "u", text: d.headline.unit || "" }))));
     }
-    const rest = {};
     if (m) {
       for (const [k, val] of Object.entries(m)) {
         if (k === "regions" || k === "thresholds" || k === "overlay_legend") continue;
         if (/_regions$/.test(k) && Array.isArray(val)) continue;
         if (k === "evidence_ha" && typeof val === "number" && isFinite(val)) {
           // the headline usually *is* the evidence area — don't show it twice
-          if (!(d.headline && d.headline.value === val)) cards.appendChild(measurementCard(k, val, evLabel ? capFirst(evLabel) : "Evidence area"));
+          if (hv !== val) cards.push(measurementCard(k, val, evLabel ? capFirst(evLabel) : "Evidence area"));
           continue;
         }
-        if (isCardKey(k, val)) cards.appendChild(measurementCard(k, val));
-        else rest[k] = val;
+        if (isCardKey(k, val)) {
+          if (!(compact && hv === val)) cards.push(measurementCard(k, val));
+        } else rest[k] = val;
       }
     }
-    if (cards.children.length || Object.keys(rest).length || (m && m.thresholds)) {
-      const p = panel("Measurements", cards);
-      if (!cards.children.length) cards.appendChild(el("div", { class: "muted", text: "No area measurements." }));
-      const restRows = kvTable(rest);
-      if (m && m.thresholds) kvTable(m.thresholds, "thresholds", restRows);
-      if (restRows.length) {
-        p.appendChild(el("details", { class: "collapsible", style: "margin-top:10px" },
-          el("summary", { text: "All measurements (" + restRows.length + ")" }), el("table", { class: "kv" }, el("tbody", null, restRows))));
-      }
-      R.appendChild(p);
+    return { cards, rest, m };
+  }
+
+  function verdictBanner(d) {
+    const vd = d.verdict;
+    if (!vd) {
+      const waiting = LOCATION_WAIT.has(d.status);
+      const failed = d.status === "failed" || d.status === "interrupted";
+      return panel(waiting ? "Location needed before analysis" : failed ? "No verdict" : "Assessment pending",
+        el("p", { class: "muted", text: waiting ? "Confirm a candidate or enter a location in the Location tab. No satellite conclusion has been drawn." :
+          failed ? "The investigation stopped before the evidence could be assessed." :
+          "The verdict will appear after the evidence has been assessed. Follow the agent in the Agent log." }));
+    }
+    const status = vd.status || "inconclusive";
+    return el("div", { class: "verdict " + status },
+      el("div", { class: "verdict-kicker", text: "Verdict" }),
+      el("div", { class: "verdict-top" },
+        el("span", { class: "verdict-label", text: status }),
+        vd.confidence ? el("span", { class: "chip cert-" + vd.confidence, text: vd.confidence + " confidence" }) : null),
+      vd.summary ? el("div", { class: "verdict-summary", text: vd.summary }) : null);
+  }
+
+  const TRIAD = [["observed", "Observed", "observed"], ["inferred", "Inferred", "inferred"], ["notest", "Not established", "not_established"]];
+
+  // ---------------------------------------------------------------- Overview
+  function renderOverview(v, d) {
+    const alert = clear(v.ovAlert);
+    if (d.status === "failed" || d.status === "interrupted") alert.appendChild(fatalBox(d.status, d.error));
+    if (LOCATION_WAIT.has(d.status)) {
+      const expl = d.location_resolution && d.location_resolution.explanation;
+      alert.appendChild(el("div", { class: "fatal interrupted", role: "alert" },
+        el("h3", { text: d.status === "awaiting_location" ? "Confirm the location to continue" : "Location needed before analysis" }),
+        el("div", { class: "msg", text: expl || "The place named in the claim could not be resolved automatically." }),
+        el("div", { class: "fatal-actions" },
+          d.location_resolution || d.location ? el("button", { type: "button", class: "btn-ghost", on: { click: () => chooseTab("location", false) } }, "Choose or enter a location") : null)));
+    }
+    if (indicatorState(d).isFallback) {
+      alert.appendChild(el("div", { class: "note warn", text: "General surface change (fallback indicator): the verdict can only be supported or inconclusive on this basis." }));
     }
 
-    // observed / inferred / not established + rationale
+    clear(v.ovVerdict).appendChild(verdictBanner(d));
+
+    clear(v.ovCards);
+    const { cards } = measurementCards(d, true);
+    if (cards.length) {
+      const shown = cards.slice(0, 6);
+      const grid = el("div", { class: "cards ov-cards" }, shown);
+      v.ovCards.appendChild(grid);
+    }
+
+    clear(v.ovTriad);
+    const vd = d.verdict;
     if (vd) {
-      R.appendChild(panel("Evidence breakdown",
-        el("div", { class: "triad" },
-          el("div", { class: "triad-col observed" }, el("h4", { text: "Observed" }), list(vd.observed)),
-          el("div", { class: "triad-col inferred" }, el("h4", { text: "Inferred" }), list(vd.inferred)),
-          el("div", { class: "triad-col notest" }, el("h4", { text: "Not established" }), list(vd.not_established))),
-        el("div", { class: "subhead", text: "Rationale" }), list(vd.rationale)));
+      const seeAll = () => chooseTab("analysis", false);
+      const sec = el("section", { class: "panel triad-sum" },
+        el("div", { class: "section-title" }, el("span", { text: "What the evidence shows" }),
+          el("button", { type: "button", class: "link-btn", on: { click: seeAll } }, "Full analysis →")));
+      for (const [cls, label, key] of TRIAD) {
+        const items = Array.isArray(vd[key]) ? vd[key] : [];
+        const row = el("div", { class: "ts-row " + cls },
+          el("h4", null, el("span", { text: label }), el("span", { class: "ts-count", text: String(items.length) }),
+            items.length > 1 ? el("button", { type: "button", class: "link-btn ts-more", "aria-label": "See all " + items.length + " " + label.toLowerCase() + " findings",
+              on: { click: seeAll } }, "See all " + items.length) : null));
+        if (!items.length) row.appendChild(el("div", { class: "muted ts-none", text: "None." }));
+        else row.appendChild(el("ul", { class: "plain ts-list" }, items.slice(0, 2).map((t) =>
+          el("li", { title: typeof t === "string" ? t : "" }, el("span", { class: "clamp2", text: typeof t === "string" ? t : JSON.stringify(t) })))));
+        sec.appendChild(row);
+      }
+      v.ovTriad.appendChild(sec);
     }
+  }
 
-    // visual analysis + regions
-    const row = el("div", { class: "grid-2" });
-    if (d.visual_analysis) row.appendChild(renderVisual(d.visual_analysis));
+  // ---------------------------------------------------------------- Evidence (tables)
+  function renderEvidenceTables(v, d) {
+    const { cards, rest, m } = measurementCards(d, false);
+    const evLabel = indicatorState(d).evidenceLabel;
+
+    clear(v.evRegions);
     const regions = m && Array.isArray(m.regions) ? m.regions : null;
     const otherRegions = m ? Object.entries(m).filter(([k, val]) => k !== "regions" && /_regions$/.test(k) && Array.isArray(val) && val.length) : [];
     if ((regions && regions.length) || otherRegions.length) {
@@ -1130,61 +1529,30 @@
         p.appendChild(el("details", { class: "collapsible", style: "margin-top:10px" },
           el("summary", { text: humanize(k) + " (" + val.length + ")" }), sub.lastChild));
       }
-      row.appendChild(p);
+      v.evRegions.appendChild(p);
+    } else if (m) {
+      v.evRegions.appendChild(panel("Evidence regions", el("div", { class: "muted", text: "No evidence regions were detected." })));
     }
-    if (row.children.length) R.appendChild(row);
 
-    // methodology + sources
-    const row2 = el("div", { class: "grid-2" });
-    if (d.methodology && typeof d.methodology === "object" && Object.keys(d.methodology).length) {
-      row2.appendChild(panel("Methodology", el("table", { class: "kv" }, el("tbody", null, kvTable(d.methodology)))));
+    clear(v.evCards);
+    clear(v.evMeasure);
+    if (!cards.length && !Object.keys(rest).length && !(m && m.thresholds)) {
+      v.evCards.appendChild(panel("Measurements", el("p", { class: "muted", text: TERMINAL.has(d.status) ? "No measurements were recorded." : "Measurements will appear once the change analysis has run." })));
+      return;
     }
-    if (Array.isArray(d.sources) && d.sources.length) {
-      row2.appendChild(panel("Sources", el("ul", { class: "sources" }, d.sources.map((s) => {
-        const u = safeUrl(s.url);
-        return el("li", null,
-          el("div", { class: "sid", text: s.scene_id || s.title || "Geographic source" }),
-          el("div", { class: "smeta", text: [s.type, s.provider, s.collection].filter(Boolean).join(" · ") +
-            (s.type === "geographic" ? " · retrieved " + fmtDateTime(s.retrieved_at) : " · acquired " + fmtDateTime(s.acquired_at)) }),
-          u ? el("a", { href: u, target: "_blank", rel: "noopener noreferrer", text: "Open source record ↗" }) : null);
-      }))));
+    v.evCards.appendChild(panel("Key measurements", el("div", { class: "cards ev-cards" },
+      cards.length ? cards : el("div", { class: "muted", text: "No area measurements." }))));
+    // Full table across the page width, split into two columns so it stays short.
+    const restRows = kvTable(rest);
+    if (restRows.length || (m && m.thresholds)) {
+      const p = panel("All measurements (" + restRows.length + ")", kvColumns(restRows));
+      if (m && m.thresholds) {
+        const thr = kvTable(m.thresholds, "thresholds");
+        p.appendChild(el("details", { class: "collapsible", style: "margin-top:10px" },
+          el("summary", { text: "Thresholds (" + thr.length + ")" }), kvColumns(thr)));
+      }
+      v.evMeasure.appendChild(p);
     }
-    if (row2.children.length) R.appendChild(row2);
-    else R.appendChild(panel("Sources & method", el("p", { class: "muted", text: "Acquisition records and analysis details will appear as the investigation progresses." })));
-
-    if (Array.isArray(d.limitations) && d.limitations.length) R.appendChild(panel("Limitations", list(d.limitations)));
-  }
-
-  function renderVisual(va) {
-    const p = panel("Visual interpretation" + (va.model ? " · " + va.model : ""));
-    const a = va.analysis;
-    if (va.status !== "ok" || !a) {
-      p.appendChild(el("div", { class: "note", text: "Visual interpretation unavailable" + (va.error ? ": " + va.error : ".") }));
-      return p;
-    }
-    if (a.summary) p.appendChild(el("div", { text: a.summary, style: "margin-bottom:8px" }));
-    if (typeof a.changes_consistent_with_measurements !== "undefined" && a.changes_consistent_with_measurements !== null) {
-      const c = a.changes_consistent_with_measurements;
-      p.appendChild(el("div", { class: "note", style: "margin-bottom:8px", text: "Consistent with measurements: " + (typeof c === "boolean" ? (c ? "yes" : "no") : String(c)) }));
-    }
-    const obs = Array.isArray(a.observations) ? a.observations : [];
-    if (obs.length) {
-      p.appendChild(el("div", { class: "obs" }, obs.map((o) => el("div", { class: "obs-item" },
-        el("div", { class: "obs-head" }, el("span", { class: "obs-feature", text: o.feature || "Observation" }),
-          o.certainty ? el("span", { class: "chip cert-" + o.certainty, text: o.certainty }) : null),
-        el("div", { class: "obs-text", text: o.observation || "" }),
-        o.possible_explanation ? el("div", { class: "obs-expl", text: "Possible explanation: " + o.possible_explanation }) : null))));
-    }
-    if (Array.isArray(a.alternative_explanations) && a.alternative_explanations.length) {
-      p.append(el("div", { class: "subhead", text: "Alternative explanations" }), list(a.alternative_explanations));
-    }
-    if (Array.isArray(a.limitations) && a.limitations.length) {
-      p.append(el("div", { class: "subhead", text: "Visual limitations" }), list(a.limitations));
-    }
-    if (Array.isArray(a.additional_evidence_needed) && a.additional_evidence_needed.length) {
-      p.append(el("div", { class: "subhead", text: "Additional evidence needed" }), list(a.additional_evidence_needed));
-    }
-    return p;
   }
 
   function renderRegions(regions, title, hint) {
@@ -1209,24 +1577,122 @@
     });
     return panel(title || "Change regions (" + regions.length + ")",
       hint ? el("div", { class: "hint", text: hint }) : null,
-      el("div", { style: "overflow-x:auto" }, el("table", { class: "data" }, el("thead", null, head), el("tbody", null, rows))));
+      el("div", { class: "table-scroll" }, el("table", { class: "data" }, el("thead", null, head), el("tbody", null, rows))));
+  }
+
+  // ---------------------------------------------------------------- Analysis
+  function renderAnalysis(v, d) {
+    const vd = d.verdict;
+    clear(v.anBreakdown);
+    if (vd) {
+      v.anBreakdown.appendChild(panel("Evidence breakdown",
+        el("div", { class: "triad" }, TRIAD.map(([cls, label, key]) =>
+          el("div", { class: "triad-col " + cls }, el("h4", { text: label + " (" + (Array.isArray(vd[key]) ? vd[key].length : 0) + ")" }), list(vd[key])))),
+        el("div", { class: "subhead", text: "Verdict rationale" }), list(vd.rationale, "No rationale recorded.")));
+    } else {
+      v.anBreakdown.appendChild(panel("Evidence breakdown", el("p", { class: "muted", text: "The breakdown into observed, inferred and not-established findings appears with the verdict." })));
+    }
+
+    clear(v.anVisual);
+    if (d.visual_analysis) v.anVisual.appendChild(renderVisual(d.visual_analysis));
+    else {
+      const m = d.model && typeof d.model === "object" ? d.model : null;
+      const text = m && m.vision === false
+        ? "Skipped: " + (m.label || m.id || "the selected model") + " can't read images, so the verdict uses measurements only."
+        : TERMINAL.has(d.status) ? "No visual interpretation was recorded." : "The vision model's reading of the imagery appears here once it has run.";
+      v.anVisual.appendChild(panel("Visual interpretation", el("p", { class: "muted", text: text })));
+    }
+
+    clear(v.anClaim);
+    v.anClaim.append(el("div", { class: "section-title" }, el("span", { text: "Claim interpretation" })), renderIndicatorBlock(d));
+  }
+
+  function renderVisual(va) {
+    const p = panel("Visual interpretation" + (va.model ? " · " + va.model : ""));
+    const a = va.analysis;
+    if (va.status !== "ok" || !a) {
+      p.appendChild(el("div", { class: "note", text: "Visual interpretation unavailable" + (va.error ? ": " + va.error : ".") }));
+      return p;
+    }
+    if (a.summary) p.appendChild(el("div", { text: a.summary, style: "margin-bottom:8px" }));
+    if (typeof a.changes_consistent_with_measurements !== "undefined" && a.changes_consistent_with_measurements !== null) {
+      const c = a.changes_consistent_with_measurements;
+      p.appendChild(el("div", { class: "note", style: "margin-bottom:8px", text: "Consistent with measurements: " + (typeof c === "boolean" ? (c ? "yes" : "no") : String(c)) }));
+    }
+    const obs = Array.isArray(a.observations) ? a.observations : [];
+    if (obs.length) {
+      p.appendChild(el("div", { class: "obs" }, obs.map((o) => el("div", { class: "obs-item" },
+        el("div", { class: "obs-head" }, el("span", { class: "obs-feature", text: o.feature || "Observation" }),
+          o.certainty ? el("span", { class: "chip cert-" + o.certainty, text: o.certainty }) : null),
+        el("div", { class: "obs-text", text: o.observation || "" }),
+        o.possible_explanation ? el("div", { class: "obs-expl", text: "Possible explanation: " + o.possible_explanation }) : null))));
+    }
+    for (const [key, label] of [["alternative_explanations", "Alternative explanations"], ["limitations", "Visual limitations"],
+      ["additional_evidence_needed", "Additional evidence needed"]]) {
+      const items = a[key];
+      if (!Array.isArray(items) || !items.length) continue;
+      p.appendChild(el("details", { class: "collapsible vlm-more" }, el("summary", { text: label + " (" + items.length + ")" }), list(items)));
+    }
+    return p;
+  }
+
+  // ---------------------------------------------------------------- Method & sources
+  function renderMethod(v, d) {
+    clear(v.mtMethod);
+    clear(v.mtSources);
+    clear(v.mtLimits);
+    const pending = el("p", { class: "muted", text: "Appears as the investigation progresses." });
+    if (d.methodology && typeof d.methodology === "object" && Object.keys(d.methodology).length) {
+      v.mtMethod.appendChild(panel("Methodology", kvColumns(kvTable(d.methodology))));
+    } else v.mtMethod.appendChild(panel("Methodology", pending.cloneNode(true)));
+    if (Array.isArray(d.sources) && d.sources.length) {
+      v.mtSources.appendChild(panel("Sources (" + d.sources.length + ")", el("ul", { class: "sources" }, d.sources.map((s) => {
+        const u = safeUrl(s.url);
+        return el("li", null,
+          el("div", { class: "sid", text: s.scene_id || s.title || "Geographic source" }),
+          el("div", { class: "smeta", text: [s.type, s.provider, s.collection].filter(Boolean).join(" · ") +
+            (s.type === "geographic" ? " · retrieved " + fmtDateTime(s.retrieved_at) : " · acquired " + fmtDateTime(s.acquired_at)) }),
+          u ? el("a", { href: u, target: "_blank", rel: "noopener noreferrer", text: "Open source record ↗" }) : null);
+      }))));
+    } else v.mtSources.appendChild(panel("Sources", el("p", { class: "muted", text: "Acquisition records will appear as the investigation progresses." })));
+    v.mtLimits.appendChild(panel("Limitations", Array.isArray(d.limitations) && d.limitations.length ? list(d.limitations) : pending.cloneNode(true)));
+  }
+
+  // ---------------------------------------------------------------- sidebar
+  const SIDEBAR_KEY = "ehr.sidebar";
+  function setSidebar(open, persist) {
+    $("layout").classList.toggle("sidebar-collapsed", !open);
+    $("sidebar").hidden = !open;
+    const b = $("toggle-sidebar");
+    b.setAttribute("aria-expanded", open ? "true" : "false");
+    b.textContent = open ? "Hide sidebar" : "New investigation";
+    b.title = open ? "Collapse the form and recent list to give the investigation more room" : "Show the new-investigation form and recent list";
+    if (persist) store.set(SIDEBAR_KEY, open ? "open" : "collapsed");
   }
 
   // ---------------------------------------------------------------- init
   function init() {
     $("case-select").addEventListener("change", () => onCaseChange(true));
+    $("model-select").addEventListener("change", () => { store.set(MODEL_KEY, $("model-select").value); updateModelMeta(); });
     $("inv-form").addEventListener("submit", onSubmit);
     $("refresh-recent").addEventListener("click", loadRecent);
+    $("toggle-sidebar").addEventListener("click", () => {
+      const open = $("sidebar").hidden;
+      setSidebar(open, true);
+      if (open) $("claim").focus();
+    });
+    setSidebar(store.get(SIDEBAR_KEY) !== "collapsed", false);
     loadHealth();
     setInterval(loadHealth, 30000);
     renderPicker();
     loadCases();
+    loadModels();
     // Indicator names are needed by the recent list and the investigation header:
     // load them first, then (re)render whatever depends on them.
     loadIndicators().then(() => {
       loadRecent();
       if (state.view && state.last) {
-        try { state.view.resultsKey = undefined; render(state.last); } catch (err) { console.error(err); }
+        try { state.view.resultsKey = undefined; state.view.headKey = undefined; render(state.last); } catch (err) { console.error(err); }
       }
     });
     openFromHash();
@@ -1234,11 +1700,15 @@
   }
 
   function openFromHash() {
-    const m = /^#inv=(.+)$/.exec(location.hash);
-    if (!m) return;
-    let id;
-    try { id = decodeURIComponent(m[1]); } catch (_) { return; }
-    if (id && id !== state.currentId) openInvestigation(id);
+    const h = parseHash();
+    if (!h.id) return;
+    if (h.tab) {
+      const u = uiFor(h.id);
+      u.tab = h.tab;
+      u.chosen = true;
+    }
+    if (h.id !== state.currentId) openInvestigation(h.id);
+    else if (h.tab && state.view && state.last && state.view.id === h.id) renderTabs(state.view, state.last);
   }
 
   document.addEventListener("DOMContentLoaded", init);

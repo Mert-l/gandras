@@ -1,42 +1,327 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Evidence report · The Earth Has Receipts</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Satellite Evidence Report · __REPORT_ID__ · The Earth Has Receipts</title>
 <style>
-*{box-sizing:border-box}body{font:16px/1.6 system-ui,sans-serif;background:#eef2ef;color:#192d26;margin:0}main{max-width:1200px;margin:auto;padding:36px}h1{font-size:38px;line-height:1.15}h2{font-size:23px}section,header{background:white;border:1px solid #cbd7cf;border-radius:12px;padding:24px;margin-bottom:20px}small,.muted{color:#52655b}button{font:inherit;cursor:pointer;border:1px solid #537262;border-radius:6px;background:white;color:#192d26;padding:10px}button[aria-pressed=true]{background:#153e2c;color:white}.images{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}figure{margin:0;min-width:0}.frame{position:relative}.frame img{display:block;width:100%;height:auto}.highlight{position:absolute;border:3px solid #00ffff;box-shadow:0 0 0 2px #10271f;pointer-events:none}figcaption{overflow-wrap:anywhere;font-size:13px}.findings{display:flex;flex-wrap:wrap;gap:8px}.verdict{border-left:6px solid #987222}.supported{border-color:#27845c}.contradicted{border-color:#c34b35}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #dce3dd;overflow-wrap:anywhere}td:first-child{width:38%}pre{white-space:pre-wrap;overflow-wrap:anywhere}.actions{display:flex;gap:12px;margin-bottom:20px}#selection{font-weight:600}a{color:#175c43}@media(max-width:800px){main{padding:16px}.images{grid-template-columns:1fr}h1{font-size:28px}}@media print{body{background:white}main{padding:0}.actions{display:none}section,header{break-inside:avoid;padding:14px}.images{grid-template-columns:repeat(3,minmax(0,1fr))}button{color:black!important;background:white!important}h1{font-size:28px}}
-</style></head><body><main><div class="actions"><button id="print">Print / Save as PDF</button><button id="reset">Clear region selection</button></div><header id="header"></header><section id="answer" class="verdict"></section><section><h2>Satellite evidence</h2><p>Images share the analysis grid. Select a finding to mark its bounding region on all three views. Boxes locate regions; the overlay shows detected pixels.</p><p id="selection" role="status" aria-live="polite">No region selected</p><div id="images" class="images"></div><p id="legend"></p><h3>Individual findings</h3><div id="findings" class="findings"></div><div id="detail"></div></section><div id="sections"></div></main>
+:root{--ink:#101722;--ink2:#2a3646;--muted:#5b6878;--line:#d3d9e0;--line2:#e7ebef;--paper:#fff;--desk:#e6eaee;--tint:#f5f7f9;
+--sage:#4a6651;--sage-bg:#eef3ef;--sage-line:#a6bba8;--red:#8f443d;--red-bg:#f8eeec;--red-line:#d39791;
+--blue:#44587a;--blue-bg:#eef1f6;--blue-line:#9eafc7;--amber:#7a6330;--amber-bg:#f7f2e6;--amber-line:#c8b083;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+html{background:var(--desk)}
+body{margin:0;font:15px/1.55 var(--sans);color:var(--ink2)}
+.toolbar{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 20px;background:var(--ink);color:#dce2e9;font-size:13px}
+.toolbar b{letter-spacing:.06em;font-weight:600}
+button{font:inherit;font-size:13px;cursor:pointer;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink);padding:6px 11px}
+.toolbar button{background:#172130;color:#dce2e9;border-color:#3a495b}
+button:hover{border-color:var(--ink)}
+button[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.page{max-width:960px;margin:28px auto 48px;background:var(--paper);padding:0 64px 40px;box-shadow:0 1px 3px rgba(16,23,34,.12),0 8px 28px rgba(16,23,34,.08);border-top:6px solid var(--ink)}
+a{color:var(--blue)}
+code,.mono{font-family:var(--mono);font-size:.86em}
+h1,h2,h3,h4{color:var(--ink);line-height:1.25;font-weight:650}
+.cover{padding:40px 0 26px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:14px}
+.brand svg{width:54px;height:54px;flex:none}
+.brand-name{font-size:13px;font-weight:650;letter-spacing:.16em;text-transform:uppercase;color:var(--ink)}
+.brand-sub{font-size:12px;color:var(--muted)}
+.cover h1{font-size:34px;margin:30px 0 4px;letter-spacing:-.01em}
+.doc-ref{font-family:var(--mono);font-size:13px;color:var(--muted);margin:0 0 22px}
+.meta{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:4px;margin:0;overflow:hidden}
+.meta div{padding:9px 12px;min-width:0;background:#fff}
+.meta dt{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0}
+.meta dd{margin:2px 0 0;font-size:13px;color:var(--ink);overflow-wrap:anywhere}
+.claim-box{margin:22px 0 0;padding:14px 18px;background:var(--tint);border-left:3px solid var(--ink)}
+.claim-box .eyebrow{margin-bottom:4px}
+.claim-text{font-size:18px;line-height:1.45;color:var(--ink);margin:0;overflow-wrap:anywhere}
+.eyebrow{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.toc{margin:22px 0 0;padding:14px 18px;border:1px solid var(--line2);border-radius:4px}
+.toc ol{margin:6px 0 0;padding:0;list-style:none;columns:2;column-gap:32px;font-size:13.5px}
+.toc li{padding:2px 0;break-inside:avoid}
+.toc a{color:var(--ink2);text-decoration:none}.toc a:hover{text-decoration:underline}
+.toc .n{display:inline-block;min-width:1.9em;color:var(--muted);font-variant-numeric:tabular-nums}
+.doc-section{padding-top:30px}
+.doc-section h2{font-size:21px;margin:0 0 14px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+.doc-section h2 .num{color:var(--muted);font-weight:600;margin-right:6px}
+.doc-section h3{font-size:15px;margin:22px 0 8px;letter-spacing:.01em}
+p{margin:0 0 10px}
+.muted{color:var(--muted)}
+.lead{font-size:14px;color:var(--muted)}
+.verdict{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;padding:18px 22px;border:1px solid;border-left-width:7px;border-radius:4px;margin-bottom:16px}
+.v-supported{background:var(--sage-bg);border-color:var(--sage-line);border-left-color:var(--sage)}
+.v-contradicted{background:var(--red-bg);border-color:var(--red-line);border-left-color:var(--red)}
+.v-inconclusive{background:var(--blue-bg);border-color:var(--blue-line);border-left-color:var(--blue)}
+.v-none{background:var(--tint);border-color:var(--line);border-left-color:var(--muted)}
+.verdict-status{display:flex;align-items:baseline;flex-wrap:wrap;gap:12px;margin:4px 0 8px}
+.status-word{font-size:26px;font-weight:750;letter-spacing:.05em}
+.v-supported .status-word{color:var(--sage)}.v-contradicted .status-word{color:var(--red)}.v-inconclusive .status-word{color:var(--blue)}.v-none .status-word{color:var(--ink2)}
+.conf{font-size:12px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;border:1px solid currentColor;border-radius:999px;padding:2px 10px;color:var(--ink2)}
+.verdict-summary{font-size:15.5px;color:var(--ink);margin:0}
+.headline{min-width:170px;max-width:230px;border-left:1px solid rgba(16,23,34,.15);padding-left:20px;align-self:center}
+.hl-value{font-size:34px;font-weight:700;color:var(--ink);line-height:1.1;margin-top:4px;font-variant-numeric:tabular-nums}
+.hl-unit{font-size:16px;font-weight:600;color:var(--muted)}
+.hl-label{font-size:12.5px;color:var(--muted);margin-top:4px}
+.callout{padding:10px 14px;border:1px solid var(--line);border-radius:4px;background:var(--tint);margin:10px 0;font-size:14px}
+.callout.warn{background:var(--amber-bg);border-color:var(--amber-line)}
+.callout.err{background:var(--red-bg);border-color:var(--red-line)}
+.verdict .callout{margin:12px 0 0;background:rgba(255,255,255,.6)}
+.disclaimer{margin:18px 0 0;padding:14px 18px;border:1px solid var(--line);border-radius:4px;font-size:13.5px}
+.disclaimer h3{margin:0 0 6px;font-size:14px}
+.disclaimer ul{margin:0;padding-left:18px}.disclaimer li{margin:3px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:4px 0 10px}
+th,td{text-align:left;vertical-align:top;padding:7px 10px;border-bottom:1px solid var(--line2);overflow-wrap:break-word}
+table.kv{table-layout:fixed}table.kv td{overflow-wrap:anywhere}
+table.grid thead th{white-space:nowrap}
+table.kv th{width:34%;font-weight:600;color:var(--ink);background:var(--tint)}
+table.kv tr:first-child>*{border-top:1px solid var(--line2)}
+th code.key{display:block;font-weight:400;color:var(--muted);font-size:11px;margin-top:1px;overflow-wrap:anywhere}
+table.grid thead th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--ink);font-weight:650}
+table.grid td.num,table.grid th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+blockquote{margin:8px 0;padding:8px 14px;border-left:3px solid var(--sage-line);background:var(--tint);color:var(--ink)}
+.findings-group{border:1px solid var(--line2);border-radius:4px;padding:12px 16px 4px;margin:0 0 12px}
+.findings-group h3{margin:0 0 2px}
+.findings-group .lead{margin:0 0 6px;font-size:12.5px}
+ul{padding-left:20px;margin:4px 0 10px}li{margin:3px 0}
+.figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:12px 0}
+figure{margin:0;min-width:0;break-inside:avoid}
+.frame{position:relative;border:1px solid var(--line);background:var(--tint);aspect-ratio:1/1;overflow:hidden}
+.frame img{display:block;width:100%;height:100%;object-fit:fill}
+.frame .na{display:flex;align-items:center;justify-content:center;height:100%;padding:12px;text-align:center;color:var(--muted);font-size:13px}
+.highlight{position:absolute;border:2px solid #00e5ff;box-shadow:0 0 0 1.5px #101722,inset 0 0 0 1px #101722;pointer-events:none}
+figcaption{font-size:12px;line-height:1.45;margin-top:6px;overflow-wrap:anywhere;color:var(--ink2)}
+figcaption b{color:var(--ink)}
+.interactive{border:1px dashed var(--line);border-radius:4px;padding:12px 14px;margin:12px 0;background:#fbfcfd}
+.findings{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+#selection{font-weight:600;font-size:13.5px;margin:0;color:var(--ink)}
+.legend{font-size:13px}
+pre.rules{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 var(--mono);background:var(--tint);border:1px solid var(--line2);padding:12px 14px;border-radius:4px;color:var(--ink2)}
+a.url{font-family:var(--mono);font-size:11.5px;word-break:break-all}
+.pill{display:inline-block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--line);border-radius:3px;padding:0 6px;color:var(--muted);white-space:nowrap}
+.doc-footer{margin-top:40px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+@media screen and (max-width:820px){.page{padding:0 20px 28px;margin:0}.meta{grid-template-columns:repeat(2,minmax(0,1fr))}.meta div:last-child{grid-column:span 2}.figs{grid-template-columns:1fr}.verdict{grid-template-columns:1fr}.headline{border-left:0;padding-left:0}.toc ol{columns:1}.cover h1{font-size:27px}}
+@page{margin:20mm 16mm 20mm;
+@top-left{content:"The Earth Has Receipts \00B7  Satellite Evidence Report";font:8pt -apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#5b6878}
+@top-right{content:"Ref. __REPORT_ID__";font:8pt -apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#5b6878}
+@bottom-left{content:"Generated automatically by The Earth Has Receipts \00B7  __REPORT_ID__";font:8pt -apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#5b6878}
+@bottom-right{content:"Page " counter(page) " of " counter(pages);font:8pt -apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#5b6878}}
+@page:first{@top-left{content:none}@top-right{content:none}}
+@media print{
+html,body{background:#fff}body{font-size:9.6pt;line-height:1.45}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.no-print,.toolbar{display:none!important}
+.page{max-width:none;margin:0;padding:0;box-shadow:none;border-top:4pt solid var(--ink)}
+.cover{padding-top:18pt}.cover h1{font-size:24pt;margin-top:20pt}
+.doc-section{padding-top:16pt}.doc-section h2{font-size:14pt}.doc-section h3{font-size:11pt}
+.page-break{break-before:page}
+h2,h3,.eyebrow{break-after:avoid}
+figure,.verdict,.callout,.disclaimer,.findings-group,blockquote,tr,.toc{break-inside:avoid}
+table{font-size:8.6pt}th,td{padding:3.5pt 6pt}th code.key{font-size:7pt}
+.figs{gap:9pt}figcaption{font-size:7.8pt}
+.status-word{font-size:19pt}.hl-value{font-size:23pt}.claim-text{font-size:12.5pt}
+a{color:inherit;text-decoration:none}a.url{font-size:7.5pt}
+pre.rules{font-size:7.8pt}
+.doc-footer{font-size:8pt}}
+</style></head><body>
+<div class="toolbar no-print"><b>THE EARTH HAS RECEIPTS · SATELLITE EVIDENCE REPORT</b><span><button id="print" type="button">Print / Save as PDF</button></span></div>
+<main class="page">
+<header class="cover">
+<div class="brand">
+<svg viewBox="0 0 48 48" fill="none" aria-hidden="true" focusable="false"><path d="M33.5 11.5A17 17 0 1 0 40 29H26v-6h15" stroke="#101722" stroke-width="2.5" stroke-linecap="square" stroke-linejoin="round"/><path d="M21 7c-5 7-7 20-1 32M7 23h13M10 13h15M10 33h14" stroke="#5f7d66" stroke-width="1.4"/><path d="M38 4v10M33 9h10" stroke="#5f7d66" stroke-width="1.8"/></svg>
+<div><div class="brand-name">The Earth Has Receipts</div><div class="brand-sub">Claim verification with Sentinel-2 satellite imagery</div></div>
+</div>
+<h1>Satellite Evidence Report</h1>
+<p class="doc-ref">Report reference __REPORT_ID__</p>
+<dl class="meta" id="meta"></dl>
+<div class="claim-box"><div class="eyebrow">Claim under examination</div><p class="claim-text" id="claim"></p></div>
+<nav class="toc" aria-label="Contents"><div class="eyebrow">Contents</div><ol id="toc"></ol></nav>
+</header>
+<div id="body"></div>
+<footer class="doc-footer"><span>Generated automatically by The Earth Has Receipts.</span><span id="foot-ref">Report reference __REPORT_ID__</span></footer>
+</main>
 <script id="report-data" type="application/json">__REPORT_DATA__</script>
 <script>
 'use strict';
-const d=JSON.parse(document.getElementById('report-data').textContent);
+const d=JSON.parse(document.getElementById('report-data').textContent)||{};
 const $=id=>document.getElementById(id);
-function node(tag,text,parent){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(parent)parent.append(n);return n;}
-function section(title){const s=node('section',undefined,$('sections'));node('h2',title,s);return s;}
-function list(items,parent){if(!items?.length){node('p','None recorded.',parent);return;}const ul=node('ul',undefined,parent);items.forEach(x=>node('li',typeof x==='string'?x:JSON.stringify(x),ul));}
-function table(obj,parent,prefix=''){const t=node('table',undefined,parent);const body=node('tbody',undefined,t);function rows(o,p){Object.entries(o||{}).forEach(([k,v])=>{if(v&&typeof v==='object'&&!Array.isArray(v)){rows(v,p+k+'.');return;}const tr=node('tr',undefined,body);node('th',p+k,tr).scope='row';node('td',typeof v==='object'?JSON.stringify(v):String(v??'Not recorded'),tr);});}rows(obj,prefix);}
-node('small','THE EARTH HAS RECEIPTS · EVIDENCE REPORT',$('header'));node('h1',d.claim,$('header'));
-node('p',`${d.investigation_id} · Status: ${d.status} · Report state: ${d.updated_at||'not recorded'}`,$('header'));
-if(d.location)node('p',`${d.location.name||'Investigation area'} · ${d.location.latitude}, ${d.location.longitude} · ${d.location.width_km} km width`,$('header'));
-if(d.from_cache)node('p','Replayed from cache. Acquisition timestamps below describe the evidence dates.',$('header'));
-const v=d.verdict||{};node('h2',`Verdict: ${v.status||'Pending'} · ${v.confidence||'Unassessed'} confidence`,$('answer'));$('answer').classList.add(v.status||'pending');node('p',v.summary||'No final answer is available for this investigation.',$('answer'));if(d.status!=='completed')node('p','This report is incomplete; the investigation has not completed.',$('answer'));
-const boxes=[];
-(d.images||[]).forEach(im=>{const f=node('figure',undefined,$('images'));node('h3',im.role,f);const frame=node('div',undefined,f);frame.className='frame';if(im.data){const image=node('img',undefined,frame);image.src=im.data;image.alt=im.role+' satellite evidence';const box=node('div',undefined,frame);box.className='highlight';box.hidden=true;boxes.push(box);}else node('p','Image unavailable.',frame);node('figcaption',[im.scene_id,im.acquired_at||im.date].filter(Boolean).join(' · ')||'Derived from the selected scene pair',f);});
-const m=d.measurements||{},grid=d.methodology?.grid||{};
-$('legend').textContent=Object.entries(m.overlay_legend||{}).map(([k,v])=>k+': '+v).join(' · ');
-const buttons=[];function select(r,button){buttons.forEach(b=>b.setAttribute('aria-pressed',String(b===button)));const bounds=r?.bbox_px;const valid=bounds?.length===4&&bounds.every(Number.isFinite)&&grid.width>0&&grid.height>0;boxes.forEach(b=>{b.hidden=!valid;if(valid){const[x,y,w,h]=bounds;b.style.left=100*x/grid.width+'%';b.style.top=100*y/grid.height+'%';b.style.width=100*w/grid.width+'%';b.style.height=100*h/grid.height+'%';}});$('selection').textContent=r?`Finding ${r.id}: ${r.area_ha} ha. ${valid?'Cyan boxes show its bounds.':'Region geometry unavailable.'}`:'No region selected';$('detail').replaceChildren();if(r)table(r,$('detail'));}
-(m.regions||[]).forEach(r=>{const b=node('button',`Region ${r.id} · ${r.area_ha} ha`,$('findings'));b.type='button';b.setAttribute('aria-pressed','false');b.onclick=()=>select(r,b);buttons.push(b);});if(!buttons.length)node('p','No qualifying change regions reported. This does not prove that no change occurred.',$('findings'));
-$('reset').onclick=()=>select(null,null);$('print').onclick=()=>window.print();
-if(d.location_resolution){
-  const geographic=section('Geographic location and verification');
-  table({status:d.location_resolution.verification_status,boundary_status:d.location?.boundary_status,
-    explanation:d.location_resolution.explanation,coordinates:d.location?{latitude:d.location.latitude,longitude:d.location.longitude}:null,
-    bbox:d.location?.bbox,boundary_source:d.location?.boundary_source},geographic);
-  list(d.location?.uncertainty,geographic);
-  (d.location?.evidence||[]).forEach(e=>{node('blockquote',e.quote,geographic);if(/^https?:\/\//i.test(e.url||'')){const a=node('a','Geographic source',geographic);a.href=e.url;a.rel='noopener noreferrer';}});
-}
-for(const[key,title]of [['observed','Observed'],['inferred','Inferred'],['not_established','Not established'],['rationale','Verdict rationale']])list(v[key],section(title));
-if(d.headline) table(d.headline,section('Key result'));
-table(Object.fromEntries(Object.entries(m).filter(([k])=>k!=='regions')),section('Metrics'));
-table(d.methodology,section('Methodology'));
-const sources=section('Sources and acquisition timestamps');if(!d.sources?.length)node('p','No source records available.',sources);
-(d.sources||[]).forEach(s=>{table(s,sources);if(/^https?:\/\//i.test(s.url||'')){const a=node('a','Open source record',sources);a.href=s.url;a.rel='noopener noreferrer';a.target='_blank';}});
-list([...new Set([...(d.limitations||[]),...(v.limitations||[])])],section('Limitations'));
+const NR='Not recorded';
+const isObj=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
+const obj=x=>isObj(x)?x:{};
+const arr=x=>Array.isArray(x)?x:[];
+const has=x=>x!==undefined&&x!==null&&x!=='';
+function el(tag,cls,text,parent){const n=document.createElement(tag);if(cls)n.className=cls;if(has(text))n.textContent=String(text);if(parent)parent.append(n);return n;}
+function fmtTime(s){const m=/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/.exec(s);if(!m)return s;const tz=m[3];return m[1]+' '+m[2]+(tz?(tz==='Z'||tz==='+00:00'?' UTC':' UTC'+tz):'');}
+function show(v){if(!has(v))return NR;if(typeof v==='boolean')return v?'Yes':'No';if(Array.isArray(v))return v.length?v.map(x=>isObj(x)||Array.isArray(x)?JSON.stringify(x):show(x)).join(', '):'None';if(isObj(v))return JSON.stringify(v);return fmtTime(String(v));}
+const ABBR={aoi:'AOI',ndvi:'NDVI',ndbi:'NDBI',bsi:'BSI',mndwi:'MNDWI',nbr:'NBR',dnbr:'dNBR',scl:'SCL',vlm:'VLM',epsg:'EPSG',id:'ID',stac:'STAC',utm:'UTM',mad:'MAD',nir:'NIR',px:'px',llm:'LLM'};
+const UNIT={ha:'(ha)',pct:'(%)',m:'(m)',km:'(km)',m2:'(m²)',s:'(s)'};
+function human(k){const p=String(k).split('_').filter(Boolean);return p.map((w,i)=>{const l=w.toLowerCase();if(i&&i===p.length-1&&UNIT[l])return UNIT[l];if(ABBR[l])return ABBR[l];return i?w:w.charAt(0).toUpperCase()+w.slice(1);}).join(' ');}
+const safe=u=>typeof u==='string'&&/^https?:\/\//i.test(u);
+function urlNode(u){if(!safe(u))return document.createTextNode(has(u)?String(u):NR);const a=el('a','url',u);a.href=u;a.rel='noopener noreferrer';a.target='_blank';return a;}
+function cell(td,c){if(c instanceof Node)td.append(c);else td.textContent=show(c);}
+function kv(rows,parent){const t=el('table','kv',null,parent),b=el('tbody',null,null,t);rows.forEach(([label,value,key])=>{const tr=el('tr',null,null,b),th=el('th',null,label,tr);th.scope='row';if(key)el('code','key',key,th);cell(el('td',null,null,tr),value);});return t;}
+function flat(o,skip=[],prefix=''){const rows=[];Object.entries(obj(o)).forEach(([k,v])=>{if(skip.includes(k))return;const key=prefix+k;if(isObj(v)&&Object.keys(v).length){rows.push(...flat(v,[],key+'.'));return;}const parent=prefix?human(prefix.slice(0,-1).split('.').pop())+' · ':'';rows.push([parent+human(k),v,key]);});return rows;}
+function grid(headers,rows,parent,numeric=[]){const t=el('table','grid',null,parent),hr=el('tr',null,null,el('thead',null,null,t));headers.forEach((h,i)=>{const th=el('th',numeric.includes(i)?'num':null,h,hr);th.scope='col';});const b=el('tbody',null,null,t);rows.forEach(r=>{const tr=el('tr',null,null,b);r.forEach((c,i)=>cell(el('td',numeric.includes(i)?'num':null,null,tr),c));});return t;}
+function bullets(items,parent,empty){const xs=arr(items).filter(has);if(!xs.length){el('p','muted',empty||'None recorded.',parent);return;}const ul=el('ul',null,null,parent);xs.forEach(x=>el('li',null,typeof x==='string'?x:JSON.stringify(x),ul));}
+const toc=[];let num=0,apx=0;
+function section(id,title,kind){const s=el('section','doc-section',null,$('body'));s.id=id;const label=kind==='plain'?'':kind==='appendix'?'Appendix '+String.fromCharCode(65+apx++):(++num)+'.';const h=el('h2',null,null,s);if(label)el('span','num',label,h);h.append(title);toc.push([id,label,title]);return s;}
+const h3=(t,p)=>el('h3',null,t,p);
+const pct=x=>typeof x==='number'?Math.round(x*1000)/10+'%':x;
+
+const v=obj(d.verdict),loc=obj(d.location),m=obj(d.measurements),meth=obj(d.methodology),gridInfo=obj(meth.grid),info=obj(d.indicator_info),ts=obj(d.temporal_scope),ci=obj(d.claim_interpretation),err=isObj(d.error)?d.error:null;
+const va=isObj(d.visual_analysis)?d.visual_analysis:null,lr=isObj(d.location_resolution)?d.location_resolution:null,corr=isObj(d.corroboration)?d.corroboration:null,model=isObj(d.model)?d.model:null;
+const images=arr(d.images).filter(isObj),extras=arr(d.extra_images).filter(isObj),sources=arr(d.sources).filter(isObj),steps=arr(d.steps).filter(isObj),regions=arr(m.regions).filter(isObj);
+const imgOf=role=>obj(images.find(i=>i.role===role));
+const statusText=has(d.status)?human(d.status):NR;
+
+/* Cover */
+[['Reference',d.investigation_id],['Investigation status',statusText],['Created',d.created_at],['Last updated',d.updated_at],['Report generated',d.report_generated_at]].forEach(([k,x])=>{const w=el('div',null,null,$('meta'));el('dt',null,k,w);el('dd',null,show(x),w);});
+$('claim').textContent=has(d.claim)?d.claim:NR;
+
+/* Executive summary */
+const exec=section('summary','Executive summary','plain');
+const VCLS={supported:'v-supported',contradicted:'v-contradicted',inconclusive:'v-inconclusive'};
+const panel=el('div','verdict '+(VCLS[v.status]||'v-none'),null,exec);
+const vm=el('div',null,null,panel);
+el('div','eyebrow','Verdict on the claim as interpreted',vm);
+const vs=el('div','verdict-status',null,vm);
+el('span','status-word',has(v.status)?String(v.status).toUpperCase():'No verdict issued',vs);
+if(has(v.confidence))el('span','conf',v.confidence+' confidence',vs);
+el('p','verdict-summary',has(v.summary)?v.summary:'No verdict is recorded for this investigation.',vm);
+if(err){const c=el('div','callout err',null,vm);el('b',null,'Investigation stopped'+(has(err.code)?' ('+err.code+')':'')+': ',c);c.append(has(err.message)?String(err.message):NR);}
+const hl=isObj(d.headline)?d.headline:null;
+if(hl){const r=el('div','headline',null,panel);el('div','eyebrow','Headline measurement',r);const n=el('div','hl-value',show(hl.value),r);if(has(hl.unit))el('span','hl-unit',' '+hl.unit,n);el('div','hl-label',has(hl.label)?hl.label:NR,r);}
+if(d.status!=='completed')el('div','callout warn','This investigation did not complete (status: '+statusText+'). The report records only what was produced before it stopped.',exec);
+if(d.from_cache)el('div','callout','Results were replayed from cache of an earlier run on the same inputs. Acquisition timestamps describe the evidence dates, not the run date.',exec);
+h3('Key facts',exec);
+const before=imgOf('Before'),after=imgOf('After');
+const providers=[...new Set(sources.filter(s=>s.type==='satellite').map(s=>[s.provider,s.collection].filter(has).join(' · ')).filter(has))];
+const coords=has(loc.latitude)&&has(loc.longitude)?loc.latitude+', '+loc.longitude+' (latitude, longitude)':null;
+const aoi=[has(loc.width_km)?loc.width_km+' km wide':null,has(m.aoi_area_ha)?m.aoi_area_ha+' ha':null].filter(Boolean).join(' · ');
+const modelText=model?[model.label||model.model||model.id,[model.provider,model.location].filter(has).join(', ')].filter(has).join(' — ')+(has(model.model)&&model.label&&model.label!==model.model?' ('+model.model+')':''):null;
+const indText=has(info.name)?info.name+(has(d.indicator)?' ('+d.indicator+')':''):has(d.indicator)?d.indicator:has(d.mode)?'Not recorded (investigation mode: '+d.mode+')':null;
+kv([['Claim',d.claim],
+ ['Indicator',indText],
+ ['Requested indicator',d.requested_indicator],
+ ['Location',loc.name],['Coordinates',coords],['Area of interest',aoi||null],
+ ['Comparison targets',has(ts.before_target)||has(ts.after_target)?show(ts.before_target)+' → '+show(ts.after_target):null],
+ ['Before acquisition',before.acquired_at||before.date?[show(before.acquired_at||before.date),before.scene_id].filter(has).join(' · '):null],
+ ['After acquisition',after.acquired_at||after.date?[show(after.acquired_at||after.date),after.scene_id].filter(has).join(' · '):null],
+ ['Model used',modelText],
+ ['Vision model (visual interpretation)',va&&va.model],
+ ['Imagery data source',providers.length?providers.join('; '):null]],exec);
+const disc=el('div','disclaimer',null,exec);h3('What this report does and does not establish',disc);
+bullets(['It records what Sentinel-2 satellite observations show for the stated area of interest and acquisition dates, measured by deterministic geospatial code.',
+'The verdict (supported, contradicted or inconclusive) applies only to the claim as interpreted in Section 1, within that area and period. “Inconclusive” means the available evidence could not settle the claim; it is not evidence that nothing happened.',
+'It does not establish cause, intent, ownership, legality, permits or compliance, and it is not a legal, regulatory or expert determination.',
+'Model-generated visual interpretation is advisory: it may adjust confidence but never establishes change.',
+'This document was generated automatically by software. It carries no signature, certification or endorsement by any authority.'],disc);
+
+/* 1. Claim and scope */
+const s1=section('claim-scope','Claim and scope');
+h3('Claim as submitted',s1);el('blockquote',null,has(d.claim)?d.claim:NR,s1);
+h3('Interpretation',s1);
+kv([['Indicator',indText,'indicator'],['Requested indicator',d.requested_indicator,'requested_indicator'],...flat(ci,['indicator'])],s1);
+h3('Comparison period',s1);
+kv(Object.keys(ts).length?flat(ts):[['Temporal scope',null]],s1);
+h3('Area of interest',s1);
+kv([['Name',loc.name,'name'],['Latitude',loc.latitude,'latitude'],['Longitude',loc.longitude,'longitude'],['Width (km)',loc.width_km,'width_km'],
+ ...['project','operator','country','region','bbox','boundary_status','verification_status','geocoder_label'].filter(k=>has(loc[k])&&!(Array.isArray(loc[k])&&!loc[k].length)).map(k=>[human(k),loc[k],k])],s1);
+
+/* 2. Findings */
+const s2=section('findings','Findings');
+[['observed','Observed','Measured directly from the satellite imagery.'],['inferred','Inferred','Interpretations consistent with the measurements; not directly observed.'],['not_established','Not established','Questions this evidence cannot answer.'],['rationale','Verdict rationale','Rules and evidence that determined the verdict and its confidence.']].forEach(([k,t,lead])=>{const g=el('div','findings-group',null,s2);h3(t,g);el('p','lead',lead,g);bullets(v[k],g);});
+
+/* 3. Satellite evidence */
+const s3=section('evidence','Satellite evidence');s3.classList.add('page-break');
+const gw=gridInfo.width,gh=gridInfo.height;
+el('p','lead',has(gw)&&has(gh)?`Figures 1–3 share the common analysis grid (${[has(gridInfo.epsg)?'EPSG:'+gridInfo.epsg:null,has(gridInfo.resolution_m)?gridInfo.resolution_m+' m pixels':null,gw+' × '+gh+' px'].filter(Boolean).join(', ')}). Boxes locate change regions; the overlay shows detected pixels.`:'Analysis grid not recorded.',s3);
+const boxes=[];let fig=0;
+function figure(im,parent,caption,boxed){const f=el('figure',null,null,parent);const fr=el('div','frame',null,f);
+ if(typeof im.data==='string'&&im.data.startsWith('data:image/png;base64,')){const i=el('img',null,null,fr);i.src=im.data;i.alt=(im.role||'Satellite')+' image';if(boxed){const b=el('div','highlight',null,fr);b.hidden=true;boxes.push(b);}}
+ else el('div','na','Image not available in this report.',fr);
+ const fc=el('figcaption',null,null,f);el('b',null,'Figure '+(++fig)+' — '+(im.role||'Image'),fc);fc.append(el('br'),caption);}
+const anyImagery=images.some(i=>i.data||i.scene_id);const figs=el('div','figs',null,anyImagery?s3:null);
+const sameGrid=im=>has(gw)&&im.width===gw&&im.height===gh;
+images.forEach(im=>{const scene=[im.scene_id?'Scene '+im.scene_id:null,im.acquired_at||im.date?'acquired '+show(im.acquired_at||im.date):null].filter(Boolean).join(', ');
+ figure(im,figs,scene||(im.role==='Change overlay'?'Derived from the selected scene pair on the analysis grid.':'Scene metadata not recorded.'),!has(im.width)||sameGrid(im));});
+if(!anyImagery)el('p','muted','No satellite imagery is recorded for this investigation.',s3);
+else if(!images.some(i=>i.data))el('p','muted','The satellite images could not be embedded in this report.',s3);
+const legend=Object.entries(obj(m.overlay_legend));
+if(legend.length){h3('Overlay legend',s3);const ul=el('ul','legend',null,s3);legend.forEach(([k,x])=>{const li=el('li',null,null,ul);el('b',null,human(k)+': ',li);li.append(String(x));});}
+const ia=el('div','interactive no-print',null,s3);
+const selP=el('p',null,'No region selected. Select a finding to mark its bounding region on the figures.',ia);selP.id='selection';selP.setAttribute('role','status');selP.setAttribute('aria-live','polite');
+const fb=el('div','findings',null,ia);const det=el('div',null,null,ia);
+const buttons=[];
+function select(r,button){buttons.forEach(b=>b.setAttribute('aria-pressed',String(b===button)));const bounds=r&&r.bbox_px;const valid=Array.isArray(bounds)&&bounds.length===4&&bounds.every(Number.isFinite)&&gw>0&&gh>0;
+ boxes.forEach(b=>{b.hidden=!valid;if(valid){const[x,y,w,h]=bounds;b.style.left=100*x/gw+'%';b.style.top=100*y/gh+'%';b.style.width=100*w/gw+'%';b.style.height=100*h/gh+'%';}});
+ $('selection').textContent=r?`Finding ${show(r.id)}: ${show(r.area_ha)} ha. ${valid?'Cyan boxes show its bounds.':'Region geometry unavailable.'}`:'No region selected. Select a finding to mark its bounding region on the figures.';
+ det.replaceChildren();if(r)kv(flat(r),det);}
+regions.forEach(r=>{const b=el('button',null,`Region ${show(r.id)} · ${show(r.area_ha)} ha`+(has(r.pattern)?' · '+human(r.pattern):''),fb);b.type='button';b.setAttribute('aria-pressed','false');b.onclick=()=>select(r,b);buttons.push(b);});
+if(buttons.length){const c=el('button',null,'Clear region selection',fb);c.type='button';c.id='reset';c.onclick=()=>select(null,null);}
+else el('p','muted','No qualifying change regions reported. This does not prove that no change occurred.',fb);
+if(extras.length){h3('Derived index maps',s3);el('p','lead','Index maps computed from the same scene pair. Region boxes are drawn only on maps that match the analysis grid.',s3);const ef=el('div','figs',null,s3);extras.forEach(im=>figure(im,ef,'Derived from the selected scene pair.',sameGrid(im)));}
+
+/* 4. Measurements */
+const s4=section('measurements','Measurements');
+if(hl)kv([[has(hl.label)?hl.label:'Headline',show(hl.value)+(has(hl.unit)?' '+hl.unit:'')]],s4);
+if(has(m.caveat))el('div','callout warn',m.caveat,s4);
+h3('Summary measurements',s4);
+const mrows=flat(m,['regions','thresholds','overlay_legend','excluded','caveat']);
+kv(mrows.length?mrows:[['Measurements',null]],s4);
+h3('Change regions',s4);
+const perRegion={};arr(corr&&corr.per_region).forEach(p=>{if(isObj(p))perRegion[p.id]=p.persisting_fraction;});
+if(regions.length)grid(['ID','Area (ha)','Pattern','Centroid (lon, lat)','Extent (m)','Persisting'],regions.map(r=>[r.id,r.area_ha,has(r.pattern)?human(r.pattern):null,r.centroid_lonlat,r.extent_m,r.id in perRegion?pct(perRegion[r.id]):null]),s4,[0,1,5]);
+else el('p','muted','No qualifying change regions reported. This does not prove that no change occurred.',s4);
+if(arr(m.excluded).length){h3('Excluded from measurement',s4);bullets(m.excluded,s4);}
+h3('Independent corroboration',s4);
+if(corr){kv(flat(corr,['per_region']).map(([l,x,k])=>[l,/fraction$/.test(k)?pct(x):x,k]),s4);}else el('p','muted','No corroborating observation is recorded.',s4);
+if(isObj(d.evidence_assessment)){h3('Evidence assessment',s4);kv(flat(d.evidence_assessment,['notes']),s4);bullets(d.evidence_assessment.notes,s4,'No assessment notes recorded.');}
+
+/* 5. Visual interpretation */
+const s5=section('visual','Visual interpretation');
+if(!va)el('p','muted','No visual interpretation is recorded for this investigation.',s5);
+else{const an=obj(va.analysis);
+ el('div','callout','Model-generated interpretation of the before/after images. Under the verification rules it may adjust confidence but never establishes change.',s5);
+ kv([['Vision model',va.model,'model'],['Status',va.status,'status'],['Consistent with measurements',an.changes_consistent_with_measurements,'changes_consistent_with_measurements'],['Attempts',va.attempts,'attempts'],['Duration (s)',va.duration_s,'duration_s'],['Cached',va.cached,'cached'],...(has(va.error)?[['Error',va.error,'error']]:[])],s5);
+ if(has(an.summary)){h3('Summary',s5);el('p',null,an.summary,s5);}
+ const obs=arr(an.observations).filter(isObj);if(obs.length){h3('Observations',s5);grid(['Feature','Observation','Possible explanation','Certainty'],obs.map(o=>[o.feature,o.observation,o.possible_explanation,o.certainty]),s5);}
+ [['alternative_explanations','Alternative explanations'],['limitations','Model-stated limitations'],['additional_evidence_needed','Additional evidence needed']].forEach(([k,t])=>{if(arr(an[k]).length){h3(t,s5);bullets(an[k],s5);}});}
+
+/* 6. Location research */
+const s6=section('location','Location research');
+if(!lr)el('p','muted','No automatic location research is recorded for this investigation.',s6);
+else{
+ kv([['Status',lr.status,'status'],['Verification status',lr.verification_status,'verification_status'],['Selection',lr.selection,'selection'],['Started',lr.started_at,'started_at'],['Resolved',lr.resolved_at,'resolved_at'],['Explanation',lr.explanation,'explanation'],['Boundary status',loc.boundary_status,'boundary_status'],['Geocoder match',loc.geocoder_label,'geocoder_label'],['Geocoder record',has(loc.geocoder_url)?urlNode(loc.geocoder_url):null,'geocoder_url']],s6);
+ const ev=arr(loc.evidence).filter(isObj);h3('Location evidence',s6);
+ if(ev.length)ev.forEach(e=>{const q=el('blockquote',null,has(e.quote)?'“'+e.quote+'”':NR,s6);const p=el('div','muted',null,q);p.style.fontSize='12px';p.append([e.source_quality,has(e.retrieved_at)?'retrieved '+show(e.retrieved_at):null].filter(has).join(' · ')+' ');p.append(urlNode(e.url));});
+ else el('p','muted','No quoted location evidence recorded.',s6);
+ h3('Location uncertainty',s6);bullets(arr(loc.uncertainty).length?loc.uncertainty:lr.uncertainty,s6);
+ const cands=arr(lr.candidates).filter(isObj);if(cands.length){h3('Candidate locations considered',s6);grid(['Name','Latitude','Longitude','Verification','Boundary'],cands.map(c=>[c.name,c.latitude,c.longitude,c.verification_status,c.boundary_status]),s6);}
+ const att=arr(lr.attempts).filter(isObj);if(att.length){h3('Search attempts',s6);grid(['#','Query','Searched at','Results','Fetch errors'],att.map(a=>[a.attempt,a.query,a.searched_at,arr(a.results).length,arr(a.errors).length]),s6,[0,3,4]);}
+ if(isObj(lr.clues)&&Object.keys(lr.clues).length){h3('Geographic clues extracted from the claim',s6);kv(flat(lr.clues),s6);}}
+
+/* 7. Methodology */
+const s7=section('methodology','Methodology');
+const mr=flat(meth,['verification_rules']);kv(mr.length?mr:[['Methodology',null]],s7);
+if(has(meth.verification_rules)){h3('Verification rules',s7);el('pre','rules',meth.verification_rules,s7);}
+
+/* 8. Limitations */
+const s8=section('limitations','Limitations');
+bullets([...new Set([...arr(d.limitations),...arr(v.limitations)])],s8);
+
+/* Appendix A */
+const sa=section('sources','Sources and provenance','appendix');
+el('p','lead','Satellite scene records (STAC items) and geographic sources used by this investigation. Links point to the original records.',sa);
+if(sources.length)grid(['#','Type / role','Record','Acquired / retrieved','Link'],sources.map((s,i)=>{const rec=el('div');rec.append(String(s.title||s.scene_id||NR));const extra=[s.provider,s.collection,has(s.processing_baseline)?'baseline '+s.processing_baseline:null].filter(has).join(' · ');if(extra)el('div','muted',extra,rec);return[i+1,[s.type,s.role].filter(has).join(' / ')||NR,rec,s.acquired_at||s.retrieved_at,urlNode(s.url)];}),sa,[0]);
+else el('p','muted','No source records available.',sa);
+
+/* Appendix B */
+const sb=section('activity','Agent activity log','appendix');
+el('p','lead','Every step the investigation agent executed, in order. “Decided by” records whether a language model, a fixed rule or the system chose the action.',sb);
+const DEC={llm:'LLM',rule:'Rule',system:'System'};
+if(steps.length)grid(['#','Action','Decided by','Status','Started','Summary'],steps.map((s,i)=>[has(s.index)?s.index:i+1,has(s.action)?human(s.action):null,DEC[s.decided_by]||s.decided_by,s.status,s.started_at,s.summary]),sb,[0]);
+else el('p','muted','No agent steps recorded.',sb);
+
+/* Footer, contents */
+$('foot-ref').textContent='Report reference '+show(d.investigation_id)+' · generated '+show(d.report_generated_at);
+toc.forEach(([id,label,title])=>{const li=el('li',null,null,$('toc'));const a=el('a',null,null,li);a.href='#'+id;if(/^\d/.test(label)){el('span','n',label,a);a.append(title);}else a.append(label?label+' — '+title:title);});
+$('print').onclick=()=>window.print();
 </script></body></html>

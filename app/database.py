@@ -57,7 +57,7 @@ def list_recent(limit: int = 30) -> list[dict]:
         legacy = {"forest": "forest_clearing", "mining": "surface_disturbance"}
         ind = s.get("indicator") or legacy.get(s["mode"])
         out.append({"investigation_id": s["investigation_id"], "status": s["status"], "mode": s["mode"],
-                    "indicator": ind, "requested_indicator": s.get("requested_indicator", legacy.get(s["mode"], s["mode"])),
+                    "indicator": ind, "model_label": (s.get("model") or {}).get("label"), "requested_indicator": s.get("requested_indicator", legacy.get(s["mode"], s["mode"])),
                     "claim": s["claim"], "case_id": s.get("case_id"), "created_at": s["created_at"],
                     "verdict_status": (s.get("verdict") or {}).get("status")})
     return out

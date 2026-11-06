@@ -55,6 +55,18 @@ class Runner:
 
     # ------------------------------------------------------------ main loop
     def run(self) -> InvestigationState:
+        from app.llm import registry
+        try:
+            profile = registry.get_profile((self.st.model or {}).get("id"))
+        except KeyError:
+            # The chosen model was removed from config since creation: say so, use the default.
+            profile = registry.active()
+            self.st.errors.append(f"Model {(self.st.model or {}).get('id')} is no longer configured; used {profile.label}.")
+        self.st.model = profile.info()
+        with registry.use(profile):
+            return self._run()
+
+    def _run(self) -> InvestigationState:
         st = self.st
         st.status = "running"
         stats0 = dict(cache.STATS)
@@ -67,6 +79,7 @@ class Runner:
             from app.agent import tools
             if not self._interpret_claim():
                 return st
+            self._skip_vision_if_unsupported()
             while True:
                 allowed = planner.allowed_actions(st, self.max_retries)
                 if st.tool_call_count >= self.max_steps:
@@ -87,6 +100,18 @@ class Runner:
         st.current_step = None
         self._save()
         return st
+
+    def _skip_vision_if_unsupported(self):
+        """A text-only model cannot interpret imagery: record that once, up front, instead of
+        spending an agent step on an attempt that can only fail."""
+        st, m = self.st, self.st.model or {}
+        if m.get("vision", True) or st.visual_analysis is not None:
+            return
+        msg = f"{m.get('label', 'The selected model')} cannot read images"
+        st.visual_analysis = {"status": "unavailable", "model": m.get("label"), "analysis": None,
+                              "error": msg + "; visual interpretation skipped, verdict uses measurements only."}
+        step = self._begin("skip_visual_interpretation", "The selected model has no image input.", "system")
+        self._end(step, msg + ". Visual interpretation is skipped; the verdict will use measurements only.")
 
     def _fail(self, code: str, msg: str):
         st = self.st
@@ -183,7 +208,7 @@ class Runner:
         s = get_settings()
         from app.indicators import get
         ind = get(st.indicator)
-        key = cache.key("vlm", {"model": s.vlm_model, "indicator": ind.id, "claim": st.claim,
+        key = cache.key("vlm", {"model": (st.model or {}).get("id", s.vlm_model), "indicator": ind.id, "claim": st.claim,
                                 "scenes": [st.selected_scenes[r]["scene"]["scene_id"] for r in ("before", "after")],
                                 "grid": st.methodology["grid"], "meas": meas})
         hit = cache.get_json(key)
@@ -198,7 +223,8 @@ class Runner:
                                      measurements=meas)
                 res = r.model_dump(mode="json")
             except Exception as e:  # noqa: BLE001 - VLM failure must not invalidate measurements
-                res = {"status": "unavailable", "model": s.vlm_model, "analysis": None, "error": f"{type(e).__name__}: {e}"}
+                res = {"status": "unavailable", "model": (st.model or {}).get("label", s.vlm_model), "analysis": None,
+                       "error": f"{type(e).__name__}: {e}"}
             if res.get("status") == "ok":
                 cache.put_json(key, res)
         st.visual_analysis = res

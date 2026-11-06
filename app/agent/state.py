@@ -49,6 +49,7 @@ class InvestigationState(BaseModel):
     requested_indicator: str = "auto"
     indicator: str | None = None
     indicator_info: dict | None = None
+    model: dict | None = None               # {id, label, provider, model, location, vision}
     case_id: str | None = None
     status: Literal["queued", "running", "awaiting_location", "location_unresolved", "completed", "failed", "interrupted"] = "queued"
     created_at: str = Field(default_factory=now)

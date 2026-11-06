@@ -8,7 +8,8 @@ The agent decides what to investigate, geospatial code measures, a local Qwen vi
 interprets, and a rule-based verification engine decides what the evidence supports. Reports
 separate what was **observed** from what is **inferred** and what is **not established**.
 
-See [docs/architecture.md](docs/architecture.md) and [docs/methodology.md](docs/methodology.md).
+See [docs/architecture.md](docs/architecture.md), [docs/methodology.md](docs/methodology.md),
+[docs/models.md](docs/models.md) and [docs/improvement-options.md](docs/improvement-options.md).
 
 ## Indicators
 
@@ -44,6 +45,26 @@ Generic fallback example: "Nothing has changed at this site since 2019." on the 
 → general surface change 56.8 ha → inconclusive (low).
 
 Note: `sentinel-2-c1-l2a` has almost no 2022 scenes in the regions tested; avoid 2022 dates.
+
+## Using the app
+
+Each investigation opens in a workspace with a sticky header (claim, verdict, indicator,
+location, dates, model) and tabs: **Overview** (before/after slider, verdict, key numbers —
+fits one screen), **Evidence** (image gallery, regions, all measurements), **Analysis**
+(observed / inferred / not established, rationale, visual interpretation), **Agent log**
+(live timeline), **Location** and **Method & sources**. The selected tab is kept in the URL
+(`#inv=<id>&tab=evidence`).
+
+**Open report / Download report** produce a self-contained, print-ready *Satellite Evidence
+Report* (cover, executive summary, numbered sections, figures, appendices with provenance and the
+agent log). It embeds its images and makes no network requests; use the browser's Print → Save
+as PDF for a PDF.
+
+## Models
+
+Pick the AI model per investigation in the UI (local Ollama models are discovered
+automatically; add on-prem or cloud models in `config/models.json`). See
+[docs/models.md](docs/models.md).
 
 ## Setup
 

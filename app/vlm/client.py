@@ -1,4 +1,7 @@
-"""Ollama client for structured (schema-constrained) chat and image interpretation.
+"""Structured (schema-constrained) chat and image interpretation for the active model.
+
+The model comes from app.llm.registry: the investigation's chosen model (context) or the default.
+Ollama is called through `_client` (kept for tests); other providers via app.llm.backends.
 
 The VLM only interprets images. All measurements come from the geospatial pipeline and are
 passed in as text; nothing here computes or invents numbers.
@@ -37,21 +40,47 @@ class VLMError(RuntimeError):
 
 
 def _client(timeout_s: float) -> ollama.Client:
-    """Factory (monkeypatched in tests)."""
+    """Factory for the configured local Ollama (monkeypatched in tests)."""
     return ollama.Client(host=get_settings().ollama_url, timeout=timeout_s)
 
 
+def _ollama_client(profile, timeout_s: float) -> ollama.Client:
+    if not profile.base_url or profile.base_url.rstrip("/") == get_settings().ollama_url.rstrip("/"):
+        return _client(timeout_s)
+    return ollama.Client(host=profile.base_url, timeout=timeout_s)
+
+
 def model_available() -> bool:
-    """True if Ollama answers /api/tags and lists the configured model."""
-    s = get_settings()
+    """True if the default model is installed/configured and reachable."""
+    from app.llm import registry
     try:
-        r = httpx.get(f"{s.ollama_url.rstrip('/')}/api/tags", timeout=2.0)
-        r.raise_for_status()
-        names = {m.get("name") for m in r.json().get("models", [])} | {m.get("model") for m in r.json().get("models", [])}
-        want = s.vlm_model
-        return want in names or (":" not in want and f"{want}:latest" in names)
-    except Exception:
+        return registry.get_profile(None).available
+    except KeyError:
         return False
+
+
+def _call(profile, messages: list[dict], schema: type[BaseModel], images: list[Path] | None,
+          temperature: float, timeout_s: float) -> tuple[str, bool]:
+    """One request to the active provider -> (raw text, truncated)."""
+    from app.llm import backends
+    fmt = schema.model_json_schema()
+    if profile.provider == "ollama":
+        msgs = [dict(m) for m in messages]
+        if images:
+            i = next(i for i, m in enumerate(msgs) if m["role"] == "user")
+            msgs[i]["images"] = [str(p) for p in images]
+        try:
+            resp = _ollama_client(profile, timeout_s).chat(
+                model=profile.model, messages=msgs, format=fmt, think=False, stream=False,
+                options={"temperature": temperature, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT})
+        except (ConnectionError, httpx.HTTPError, ollama.ResponseError, OSError) as e:
+            raise VLMError(f"Ollama request failed ({type(e).__name__}): {e}") from e
+        return resp.message.content or "", getattr(resp, "done_reason", None) == "length"
+    fn = backends.openai_chat if profile.provider == "openai" else backends.anthropic_chat
+    try:
+        return fn(profile, messages, fmt, schema.__name__, images, temperature, timeout_s)
+    except backends.BackendError as e:
+        raise VLMError(str(e)) from e
 
 
 def _clean(content: str) -> str:
@@ -63,26 +92,23 @@ def _clean(content: str) -> str:
 
 def _structured_chat_impl(system: str, user: str, schema: type[BaseModel], images: list[Path] | None,
                           retries: int, temperature: float, timeout_s: float | None) -> tuple[BaseModel, int]:
+    from app.llm import registry
     s = get_settings()
-    client = _client(timeout_s if timeout_s is not None else s.http_timeout_s)
-    user_msg: dict[str, Any] = {"role": "user", "content": user}
-    if images:
-        user_msg["images"] = [str(p) for p in images]
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, user_msg]
-    fmt = schema.model_json_schema()
+    profile = registry.active()
+    if images and not profile.vision:
+        raise VLMError(f"{profile.label} cannot read images (no vision input)")
+    timeout = timeout_s if timeout_s is not None else s.http_timeout_s
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     last_err = ""
     attempts = 0
     for _ in range(retries + 1):
         attempts += 1
         try:
-            resp = client.chat(model=s.vlm_model, messages=messages, format=fmt, think=False, stream=False,
-                               options={"temperature": temperature, "num_ctx": NUM_CTX, "num_predict": NUM_PREDICT})
-        except (ConnectionError, httpx.HTTPError, ollama.ResponseError, OSError) as e:
-            raise VLMError(f"Ollama request failed ({type(e).__name__}): {e}", attempts) from e
-        content = _clean(resp.message.content or "")
-        truncated = getattr(resp, "done_reason", None) == "length"
-        log.debug("VLM attempt %d: eval_count=%s done_reason=%s", attempts,
-                  getattr(resp, "eval_count", None), getattr(resp, "done_reason", None))
+            raw, truncated = _call(profile, messages, schema, images, temperature, timeout)
+        except VLMError as e:
+            e.attempts = attempts
+            raise
+        content = _clean(raw)
         try:
             return schema.model_validate_json(content), attempts
         except ValidationError as e:
@@ -119,7 +145,9 @@ def interpret_images(before_png: Path, after_png: Path, overlay_png: Path, *, mo
                      claim: str, before_date: str, after_date: str, measurements: dict,
                      guidance: str | None = None) -> VLMResult:
     """Ask the VLM to interpret the image triplet. Never raises; never fabricates a result."""
+    from app.llm import registry
     s = get_settings()
+    model_name = registry.active().label
     t0 = time.monotonic()
     attempts = 0
     try:
@@ -132,10 +160,10 @@ def interpret_images(before_png: Path, after_png: Path, overlay_png: Path, *, mo
             analysis, attempts = _structured_chat_impl(
                 SYSTEM_PROMPT, user, VisualAnalysis, imgs, retries=2, temperature=0.1,
                 timeout_s=max(s.http_timeout_s, IMAGE_TIMEOUT_FLOOR_S))
-        return VLMResult(status="ok", model=s.vlm_model, analysis=analysis, attempts=attempts,
+        return VLMResult(status="ok", model=model_name, analysis=analysis, attempts=attempts,
                          duration_s=round(time.monotonic() - t0, 2))
     except Exception as e:  # noqa: BLE001 - contract: never raise
         attempts = getattr(e, "attempts", attempts)
         log.warning("VLM interpretation unavailable: %s", e)
-        return VLMResult(status="unavailable", model=s.vlm_model, error=f"{type(e).__name__}: {e}",
+        return VLMResult(status="unavailable", model=model_name, error=f"{type(e).__name__}: {e}",
                          attempts=attempts, duration_s=round(time.monotonic() - t0, 2))

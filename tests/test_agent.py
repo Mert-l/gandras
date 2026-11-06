@@ -207,3 +207,13 @@ def test_llm_cannot_pick_indicator_without_keywords(monkeypatch):
         {"indicator": "burn", "asserts": "change", "direction": "increase", "observable_target": "x", "explanation": "e"}))
     r, by, _ = claims.interpret("A warehouse was built here after 2020.", "auto")
     assert r.indicator == "built_up" and "keyword" in r.override
+
+
+def test_text_only_model_skips_vision_without_spending_a_step(mocked):
+    st = _state()
+    st.model = {"id": "ollama:gemma4:latest", "label": "Gemma4", "provider": "ollama", "model": "gemma4:latest",
+                "location": "local", "vision": False}
+    st = orchestrator.Runner(st, use_llm=False).run()
+    actions = [s.action for s in st.steps]
+    assert "skip_visual_interpretation" in actions and "interpret_images" not in actions
+    assert st.visual_analysis["status"] == "unavailable" and st.verdict["status"] == "contradicted"

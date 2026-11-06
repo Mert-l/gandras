@@ -33,6 +33,8 @@ class CustomLocation(BaseModel):
 class InvestigationOptions(BaseModel):
     max_agent_steps: int | None = Field(default=None, ge=3, le=15)
     allow_additional_imagery: bool = True
+    # Registry id from GET /models; only ids the server knows are accepted (no client-supplied URLs).
+    model: str | None = Field(default=None, max_length=200, pattern=r"^[A-Za-z0-9._:/@-]+$")
 
 
 class CreateInvestigation(BaseModel):

@@ -48,7 +48,20 @@ def automatic_dates(claim: str, today: date) -> dict:
     return {"before_target": before.isoformat(), "after_target": after.isoformat(), "date_basis": basis}
 
 
+def resolve_model(model_id: str | None) -> dict:
+    """Validate a requested model id against the registry and return its public info."""
+    from app.llm import registry
+    try:
+        p = registry.get_profile(model_id)
+    except KeyError:
+        raise RequestError("UNKNOWN_MODEL", f"Model '{model_id}' is not configured. See GET /models.") from None
+    if model_id and not p.available:
+        raise RequestError("MODEL_UNAVAILABLE", f"{p.label} is not available: {p.status}.")
+    return p.info()
+
+
 def create(indicator: str, claim: str, case_id: str | None, custom: dict | None, options: dict | None) -> InvestigationState:
+    model = resolve_model((options or {}).get("model"))
     if case_id:
         case = next((c for c in load_demo_cases() if c["id"] == case_id), None)
         if case is None:
@@ -64,7 +77,7 @@ def create(indicator: str, claim: str, case_id: str | None, custom: dict | None,
         scope = automatic_dates(claim, date.today())
     st = InvestigationState(investigation_id=new_id(), mode=indicator, requested_indicator=indicator, claim=claim,
                             indicator=None if indicator == "auto" else indicator, case_id=case_id, location=loc,
-                            temporal_scope=scope, options=options or {})
+                            temporal_scope=scope, options=options or {}, model=model)
     database.save(st.model_dump(mode="json"))
     _executor.submit(_run, st.investigation_id)
     return st

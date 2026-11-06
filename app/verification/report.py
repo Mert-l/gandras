@@ -39,25 +39,67 @@ def build_sections(st) -> dict:
     return {"observed": observed, "inferred": inferred, "not_established": not_est, "limitations": lim}
 
 
-def render_evidence_report(state: dict, assets_root) -> str:
-    """Portable report: embed only validated local investigation PNGs, never remote URLs."""
+_MODEL_KEYS = ('id', 'label', 'provider', 'model', 'location', 'vision')
+_STEP_KEYS = ('index', 'action', 'status', 'decided_by', 'summary', 'started_at')
+
+
+def _png_size(blob: bytes):
+    """(width, height) from a PNG IHDR chunk, or None when the bytes are not a PNG."""
+    if blob[:8] == b'\x89PNG\r\n\x1a\n' and blob[12:16] == b'IHDR':
+        return int.from_bytes(blob[16:20], 'big'), int.from_bytes(blob[20:24], 'big')
+    return None
+
+
+def _embed_local_png(url, inv: str, assets_root):
+    """Data URI + pixel size for /assets/<inv>/<name>.png inside assets_root; never anything else."""
     import base64
-    import json
     import re
     from pathlib import Path
 
+    match = re.fullmatch(r'/assets/' + re.escape(inv) + r'/([a-z0-9_]{1,40}\.png)', url if isinstance(url, str) else '')
+    if not match:
+        return None, None
+    root = Path(assets_root).resolve()
+    path = (root / inv / match[1]).resolve()
+    if root not in path.parents or not path.is_file():
+        return None, None
+    blob = path.read_bytes()
+    return 'data:image/png;base64,' + base64.b64encode(blob).decode('ascii'), _png_size(blob)
+
+
+def _clean_model(model):
+    """Model descriptor (may be absent): keep only known scalar fields."""
+    if not isinstance(model, dict):
+        return None
+    out = {k: model[k] for k in _MODEL_KEYS if isinstance(model.get(k), (str, bool, int, float))}
+    return out or None
+
+
+def render_evidence_report(state: dict, assets_root) -> str:
+    """Portable report: embed only validated local investigation PNGs, never remote URLs."""
+    import json
+    import re
+    from datetime import datetime, timezone
+    from pathlib import Path
+
     inv = state['investigation_id']
-    if not re.fullmatch(r'inv_[0-9a-f]{10}', inv):
+    if not isinstance(inv, str) or not re.fullmatch(r'inv_[0-9a-f]{10}', inv):
         raise ValueError('Invalid investigation id')
     payload = {k: state.get(k) for k in (
         'investigation_id', 'claim', 'status', 'created_at', 'updated_at', 'location',
         'temporal_scope', 'verdict', 'measurements', 'headline', 'methodology', 'sources',
-        'limitations', 'from_cache', 'error', 'location_resolution')}
-    sources = list(payload.get('sources') or [])
+        'limitations', 'from_cache', 'error', 'location_resolution', 'indicator', 'indicator_info',
+        'requested_indicator', 'claim_interpretation', 'visual_analysis', 'corroboration',
+        'evidence_assessment', 'mode')}
+    payload['report_generated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    payload['model'] = _clean_model(state.get('model'))
+    payload['steps'] = [{k: step.get(k) for k in _STEP_KEYS} for step in (state.get('steps') or [])
+                        if isinstance(step, dict)]
+    sources = [s for s in (payload.get('sources') or []) if isinstance(s, dict)]
     seen = {s.get('url') for s in sources}
     resolution = state.get('location_resolution') or {}
-    for source in resolution.get('sources', []):
-        if source.get('url') not in seen:
+    for source in resolution.get('sources') or []:
+        if isinstance(source, dict) and source.get('url') not in seen:
             sources.append({'type': 'geographic', **source})
             seen.add(source.get('url'))
     location = state.get('location') or {}
@@ -70,16 +112,21 @@ def render_evidence_report(state: dict, assets_root) -> str:
     for role, meta in [('Before', imagery.get('before') or {}),
                        ('After', imagery.get('after') or {}),
                        ('Change overlay', {'url': imagery.get('overlay_url')})]:
-        url = meta.get('url') or ''
-        match = re.fullmatch(r'/assets/' + re.escape(inv) + r'/([a-z0-9_]{1,40}\.png)', url)
         image = {k: meta[k] for k in ('scene_id', 'acquired_at', 'date') if k in meta}
-        image.update(role=role, data=None)
-        if match:
-            path = (Path(assets_root) / inv / match[1]).resolve()
-            if Path(assets_root).resolve() in path.parents and path.is_file():
-                image['data'] = 'data:image/png;base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
+        image['data'], size = _embed_local_png(meta.get('url'), inv, assets_root)
+        image.update(role=role, width=size and size[0], height=size and size[1])
         payload['images'].append(image)
+    # Derived index maps (NDVI, NDBI, dNBR, ...): only validated local PNGs; no URLs leave this function.
+    payload['extra_images'] = []
+    extra = imagery.get('extra') if isinstance(imagery.get('extra'), dict) else {}
+    for label, url in extra.items():
+        data, size = _embed_local_png(url, inv, assets_root)
+        if data:
+            payload['extra_images'].append({'role': str(label), 'data': data,
+                                            'width': size and size[0], 'height': size and size[1]})
     # Escape HTML delimiters even inside JSON strings to prevent closing the script element.
-    data = json.dumps(payload, ensure_ascii=True).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+    data = json.dumps(payload, ensure_ascii=True, default=str)
+    data = data.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     template = Path(__file__).with_name('evidence_report.html').read_text(encoding='utf-8')
-    return template.replace('__REPORT_DATA__', data)
+    # The id is regex-validated above; substitute it before the data so claim text is never rewritten.
+    return template.replace('__REPORT_ID__', inv).replace('__REPORT_DATA__', data)
