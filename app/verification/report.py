@@ -67,6 +67,18 @@ def _embed_local_png(url, inv: str, assets_root):
     return 'data:image/png;base64,' + base64.b64encode(blob).decode('ascii'), _png_size(blob)
 
 
+def _clean_osint(o):
+    """Open-source context: plain values only; links are filtered to http(s) again in the template."""
+    if not isinstance(o, dict):
+        return None
+    keep = {k: o.get(k) for k in ('status', 'trigger', 'summary', 'note', 'queries', 'counts', 'started_at', 'finished_at')}
+    keep['findings'] = [{k: str(f.get(k) or '') for k in ('quote', 'stance', 'url', 'title', 'retrieved_at')}
+                        for f in (o.get('findings') or []) if isinstance(f, dict)][:12]
+    keep['sources'] = [{k: str(s.get(k) or '') for k in ('url', 'title', 'retrieved_at')}
+                       for s in (o.get('sources') or []) if isinstance(s, dict)][:12]
+    return keep
+
+
 def _clean_model(model):
     """Model descriptor (may be absent): keep only known scalar fields."""
     if not isinstance(model, dict):
@@ -93,6 +105,8 @@ def render_evidence_report(state: dict, assets_root) -> str:
         'evidence_assessment', 'mode')}
     payload['report_generated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     payload['model'] = _clean_model(state.get('model'))
+    payload['vision_model'] = _clean_model(state.get('vision_model'))
+    payload['osint'] = _clean_osint(state.get('osint'))
     payload['steps'] = [{k: step.get(k) for k in _STEP_KEYS} for step in (state.get('steps') or [])
                         if isinstance(step, dict)]
     sources = [s for s in (payload.get('sources') or []) if isinstance(s, dict)]

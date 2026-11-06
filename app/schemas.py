@@ -35,6 +35,8 @@ class InvestigationOptions(BaseModel):
     allow_additional_imagery: bool = True
     # Registry id from GET /models; only ids the server knows are accepted (no client-supplied URLs).
     model: str | None = Field(default=None, max_length=200, pattern=r"^[A-Za-z0-9._:/@-]+$")
+    # Optional separate model for image interpretation; defaults to the planning model.
+    vision_model: str | None = Field(default=None, max_length=200, pattern=r"^[A-Za-z0-9._:/@-]+$")
 
 
 class CreateInvestigation(BaseModel):

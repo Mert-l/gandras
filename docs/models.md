@@ -46,3 +46,21 @@ on the vision model anyway — VLM agreement only adjusts confidence).
   models are slower there — ~75 s for an image interpretation vs ~25 s natively.)
 - Anthropic and OpenAI wire formats with recorded HTTP contracts in `tests/test_models.py`
   (no live cloud call: no keys were configured).
+
+## Separate planning and vision models
+
+The form has two dropdowns: **Planning model** (reads the claim, plans the agent, researches the
+location and open sources) and **Vision model** (interprets the imagery; only image-capable models,
+default "Same as planning model"). API: `options.model` and `options.vision_model`. A text-only model
+can plan while a vision model reads the images; the header and report show both.
+Tested live: Gemma4 planning + Qwen 3.5 4B vision on the Bingham Canyon case.
+
+## Open-source context when the satellite evidence is weak
+
+If the satellite verdict is inconclusive or low-confidence, or no usable imagery was found, the agent
+adds a `research_open_sources` step: the planning model writes up to two web queries, the server
+fetches up to five pages (same SSRF-safe fetcher as location discovery), and the model extracts quotes
+labelled supports / contradicts / context. A quote is kept only if it appears verbatim in the fetched
+page. Findings appear in the Analysis tab, the report (section 2) and the sources list, and **never
+change the satellite verdict** — web text is context, not measurement. Needs a search provider
+(`TAVILY_API_KEY` etc.); without one the step reports that it is unavailable.

@@ -205,7 +205,7 @@ kv([['Claim',d.claim],
  ['Before acquisition',before.acquired_at||before.date?[show(before.acquired_at||before.date),before.scene_id].filter(has).join(' · '):null],
  ['After acquisition',after.acquired_at||after.date?[show(after.acquired_at||after.date),after.scene_id].filter(has).join(' · '):null],
  ['Model used',modelText],
- ['Vision model (visual interpretation)',va&&va.model],
+ ['Vision model (visual interpretation)',(d.vision_model&&d.vision_model.label)||(va&&va.model)],
  ['Imagery data source',providers.length?providers.join('; '):null]],exec);
 const disc=el('div','disclaimer',null,exec);h3('What this report does and does not establish',disc);
 bullets(['It records what Sentinel-2 satellite observations show for the stated area of interest and acquisition dates, measured by deterministic geospatial code.',
@@ -228,6 +228,16 @@ kv([['Name',loc.name,'name'],['Latitude',loc.latitude,'latitude'],['Longitude',l
 /* 2. Findings */
 const s2=section('findings','Findings');
 [['observed','Observed','Measured directly from the satellite imagery.'],['inferred','Inferred','Interpretations consistent with the measurements; not directly observed.'],['not_established','Not established','Questions this evidence cannot answer.'],['rationale','Verdict rationale','Rules and evidence that determined the verdict and its confidence.']].forEach(([k,t,lead])=>{const g=el('div','findings-group',null,s2);h3(t,g);el('p','lead',lead,g);bullets(v[k],g);});
+
+/* 2b. Open-source context: only when the agent ran it (weak or missing satellite evidence) */
+if(d.osint){const o=d.osint,g=el('div','findings-group',null,s2);h3('Open-source context (not satellite evidence)',g);
+ el('p','lead','Gathered because '+(o.trigger||'the satellite evidence was weak')+'. '+(o.note||''),g);
+ if(has(o.summary))el('p',null,o.summary,g);
+ const label={supports_claim:'Supports the claim',contradicts_claim:'Contradicts the claim',context:'Context'};
+ const fs=arr(o.findings);if(!fs.length)el('p','muted','No verifiable open-source statements were found.',g);
+ fs.forEach(f=>{const b=el('blockquote',null,'“'+f.quote+'”',g);const c=el('p','muted',(label[f.stance]||'Context')+' · '+(f.title||f.url||''),g);
+  if(safe(f.url)){c.textContent=(label[f.stance]||'Context')+' · ';const a=el('a',null,f.title||f.url,c);a.href=f.url;a.rel='noopener noreferrer';}});
+ if(arr(o.queries).length)el('p','muted','Search queries: '+arr(o.queries).join(' · '),g);}
 
 /* 3. Satellite evidence */
 const s3=section('evidence','Satellite evidence');s3.classList.add('page-break');

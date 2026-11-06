@@ -62,6 +62,10 @@ def resolve_model(model_id: str | None) -> dict:
 
 def create(indicator: str, claim: str, case_id: str | None, custom: dict | None, options: dict | None) -> InvestigationState:
     model = resolve_model((options or {}).get("model"))
+    vision_id = (options or {}).get("vision_model")
+    vision_model = resolve_model(vision_id) if vision_id else None
+    if vision_model and not vision_model["vision"]:
+        raise RequestError("VISION_UNSUPPORTED", f"{vision_model['label']} cannot read images; choose a vision model.")
     if case_id:
         case = next((c for c in load_demo_cases() if c["id"] == case_id), None)
         if case is None:
@@ -77,7 +81,8 @@ def create(indicator: str, claim: str, case_id: str | None, custom: dict | None,
         scope = automatic_dates(claim, date.today())
     st = InvestigationState(investigation_id=new_id(), mode=indicator, requested_indicator=indicator, claim=claim,
                             indicator=None if indicator == "auto" else indicator, case_id=case_id, location=loc,
-                            temporal_scope=scope, options=options or {}, model=model)
+                            temporal_scope=scope, options=options or {}, model=model,
+                            vision_model=vision_model)
     database.save(st.model_dump(mode="json"))
     _executor.submit(_run, st.investigation_id)
     return st

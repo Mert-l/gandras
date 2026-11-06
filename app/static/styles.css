@@ -658,3 +658,12 @@ select option:disabled { color: var(--dim); }
   .tabs-row .inv-actions { order: -1; width: 100%; justify-content: flex-end; padding: 0 0 4px; }
 }
 @media (max-width: 860px) { .mt-grid { grid-template-columns: minmax(0, 1fr); } .inv-sticky { position: static; } }
+
+/* Open-source context (Analysis tab) */
+.an-osint { margin-top: 14px; }
+.osint-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 10px; }
+.osint-list li { border-left: 2px solid var(--line2); padding-left: 10px; }
+.osint-list blockquote { margin: 4px 0; color: var(--text); }
+.osint-list a { font-size: 12px; }
+.chip.stance-supports_claim { color: var(--green); }
+.chip.stance-contradicts_claim { color: var(--red); }

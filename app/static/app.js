@@ -289,6 +289,7 @@
 
   // ---------------------------------------------------------------- models
   const MODEL_KEY = "ehr.model";
+  const VISION_KEY = "ehr.visionModel";
   const LOCATION_LABELS = { local: "Local", on_premise: "On-prem", cloud: "Cloud" };
   const PROVIDER_LABELS = { ollama: "Ollama", openai: "OpenAI", anthropic: "Anthropic" };
   const locLabel = (x) => LOCATION_LABELS[x] || (x ? humanize(x) : "");
@@ -325,13 +326,24 @@
     sel.value = pick;
     if (!pick) sel.selectedIndex = -1;
     field.hidden = false;
+    // Vision model: same as planning by default; only image-capable, available models selectable.
+    const vsel = clear($("vision-select"));
+    vsel.appendChild(el("option", { value: "", text: "Same as planning model" }));
+    for (const m of state.models) {
+      if (m.vision === false) continue;
+      vsel.appendChild(el("option", { value: m.id, disabled: !m.available,
+        text: (m.label || m.model || m.id) + " \u2014 " + locLabel(m.location) + (m.available ? "" : " (" + (m.status || "unavailable") + ")") }));
+    }
+    const vstored = store.get(VISION_KEY);
+    vsel.value = vstored && findModel(vstored)?.available && findModel(vstored).vision !== false ? vstored : "";
+    $("vision-field").hidden = false;
     updateModelMeta();
   }
 
   function updateModelMeta() {
     const m = findModel($("model-select").value);
     const meta = clear($("model-meta"));
-    $("model-hint").hidden = !(m && m.vision === false);
+    $("model-hint").hidden = !(m && m.vision === false && !$("vision-select").value);
     if (!m) {
       meta.appendChild(el("span", { class: "hint", text: "No model is available right now." }));
       return;
@@ -345,8 +357,10 @@
   // Model of a stored investigation, as shown in the header ("Qwen 3.5 4B · Local").
   function investigationModel(d) {
     const m = d.model && typeof d.model === "object" ? d.model : null;
+    const vm = d.vision_model && typeof d.vision_model === "object" ? d.vision_model : null;
+    const visionPart = vm && m && vm.id !== m.id ? "; vision: " + (vm.label || vm.model || vm.id) : "";
     if (m && (m.label || m.model || m.id)) {
-      return { text: [m.label || m.model || m.id, locLabel(m.location)].filter(Boolean).join(" \u00b7 "),
+      return { text: [m.label || m.model || m.id, locLabel(m.location)].filter(Boolean).join(" \u00b7 ") + visionPart,
         title: [providerLabel(m.provider), m.model || m.id, m.vision === false ? "no image input" : ""].filter(Boolean).join(" \u00b7 "),
         vision: m.vision };
     }
@@ -471,6 +485,8 @@
 
     const modelId = state.models ? $("model-select").value : "";
     if (modelId && findModel(modelId)?.available) body.options = { model: modelId };
+    const visionId = state.models ? $("vision-select").value : "";
+    if (visionId && visionId !== modelId && findModel(visionId)?.available) body.options = { ...(body.options || {}), vision_model: visionId };
 
     btn.disabled = true;
     btn.textContent = "Submitting…";
@@ -697,7 +713,8 @@
     v.anBreakdown = el("div", { class: "stack" });
     v.anVisual = el("div");
     v.anClaim = el("section", { class: "panel" });
-    v.panels.analysis.append(v.anBreakdown, el("div", { class: "an-grid" }, v.anVisual, v.anClaim));
+    v.anOsint = el("div", { class: "an-osint" });
+    v.panels.analysis.append(v.anBreakdown, el("div", { class: "an-grid" }, v.anVisual, v.anClaim), v.anOsint);
 
     // Agent log
     v.stepCount = el("span", { class: "muted", text: "" });
@@ -1603,8 +1620,32 @@
       v.anVisual.appendChild(panel("Visual interpretation", el("p", { class: "muted", text: text })));
     }
 
+    clear(v.anOsint);
+    if (d.osint) v.anOsint.appendChild(renderOsint(d.osint));
+
     clear(v.anClaim);
     v.anClaim.append(el("div", { class: "section-title" }, el("span", { text: "Claim interpretation" })), renderIndicatorBlock(d));
+  }
+
+  // Non-imagery context gathered when the satellite evidence was weak. Never part of the verdict.
+  function renderOsint(o) {
+    const STANCE = { supports_claim: "Supports the claim", contradicts_claim: "Contradicts the claim", context: "Context" };
+    const p = panel("Open-source context (not satellite evidence)");
+    p.appendChild(el("p", { class: "hint", text: "Searched because " + (o.trigger || "the satellite evidence was weak") + ". " + (o.note || "") }));
+    if (o.summary) p.appendChild(el("p", { text: o.summary }));
+    if (o.status === "findings") {
+      const ul = el("ul", { class: "osint-list" });
+      for (const f of o.findings || []) {
+        const li = el("li", {}, el("span", { class: "chip stance-" + (f.stance || "context"), text: STANCE[f.stance] || "Context" }),
+          el("blockquote", { text: "\u201c" + (f.quote || "") + "\u201d" }));
+        const href = safeUrl(f.url);
+        if (href) li.appendChild(el("a", { href: href, target: "_blank", rel: "noopener noreferrer", text: f.title || f.url }));
+        ul.appendChild(li);
+      }
+      p.appendChild(ul);
+    }
+    if ((o.queries || []).length) p.appendChild(el("p", { class: "hint", text: "Queries: " + o.queries.join(" \u00b7 ") }));
+    return p;
   }
 
   function renderVisual(va) {
@@ -1674,6 +1715,7 @@
   function init() {
     $("case-select").addEventListener("change", () => onCaseChange(true));
     $("model-select").addEventListener("change", () => { store.set(MODEL_KEY, $("model-select").value); updateModelMeta(); });
+    $("vision-select").addEventListener("change", () => { store.set(VISION_KEY, $("vision-select").value); updateModelMeta(); });
     $("inv-form").addEventListener("submit", onSubmit);
     $("refresh-recent").addEventListener("click", loadRecent);
     $("toggle-sidebar").addEventListener("click", () => {

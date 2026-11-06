@@ -61,10 +61,14 @@
           </details>
 
           <div id="model-field" class="field model-field" hidden>
-            <label class="label" for="model-select">Model</label>
+            <label class="label" for="model-select">Planning model</label>
             <select id="model-select"></select>
             <div id="model-meta" class="model-meta"></div>
-            <p id="model-hint" class="hint model-hint" hidden>This model can't read images; visual interpretation will be skipped and the verdict uses measurements only.</p>
+            <p id="model-hint" class="hint model-hint" hidden>This model can't read images; choose a vision model below, or visual interpretation will be skipped and the verdict uses measurements only.</p>
+          </div>
+          <div id="vision-field" class="field model-field" hidden>
+            <label class="label" for="vision-select">Vision model (reads the imagery)</label>
+            <select id="vision-select"></select>
           </div>
 
           <div id="form-error" class="error-box" hidden></div>

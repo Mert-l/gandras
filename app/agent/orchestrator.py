@@ -63,6 +63,14 @@ class Runner:
             profile = registry.active()
             self.st.errors.append(f"Model {(self.st.model or {}).get('id')} is no longer configured; used {profile.label}.")
         self.st.model = profile.info()
+        self.vision_profile = profile
+        vid = (self.st.vision_model or {}).get("id")
+        if vid and vid != profile.id:
+            try:
+                self.vision_profile = registry.get_profile(vid)
+            except KeyError:
+                self.st.errors.append(f"Vision model {vid} is no longer configured; used {profile.label}.")
+        self.st.vision_model = self.vision_profile.info()
         with registry.use(profile):
             return self._run()
 
@@ -104,7 +112,7 @@ class Runner:
     def _skip_vision_if_unsupported(self):
         """A text-only model cannot interpret imagery: record that once, up front, instead of
         spending an agent step on an attempt that can only fail."""
-        st, m = self.st, self.st.model or {}
+        st, m = self.st, self.st.vision_model or self.st.model or {}
         if m.get("vision", True) or st.visual_analysis is not None:
             return
         msg = f"{m.get('label', 'The selected model')} cannot read images"
@@ -208,7 +216,7 @@ class Runner:
         s = get_settings()
         from app.indicators import get
         ind = get(st.indicator)
-        key = cache.key("vlm", {"model": (st.model or {}).get("id", s.vlm_model), "indicator": ind.id, "claim": st.claim,
+        key = cache.key("vlm", {"model": (st.vision_model or st.model or {}).get("id", s.vlm_model), "indicator": ind.id, "claim": st.claim,
                                 "scenes": [st.selected_scenes[r]["scene"]["scene_id"] for r in ("before", "after")],
                                 "grid": st.methodology["grid"], "meas": meas})
         hit = cache.get_json(key)
@@ -218,12 +226,14 @@ class Runner:
         else:
             try:
                 from app.vlm.client import interpret_images
-                r = interpret_images(d / "before.png", d / "after.png", d / "overlay.png", mode=ind.id, guidance=ind.vlm_guidance, claim=st.claim,
-                                     before_date=st.imagery["before"]["date"], after_date=st.imagery["after"]["date"],
-                                     measurements=meas)
+                from app.llm import registry as _reg
+                with _reg.use(getattr(self, "vision_profile", None) or _reg.active()):
+                    r = interpret_images(d / "before.png", d / "after.png", d / "overlay.png", mode=ind.id, guidance=ind.vlm_guidance, claim=st.claim,
+                                         before_date=st.imagery["before"]["date"], after_date=st.imagery["after"]["date"],
+                                         measurements=meas)
                 res = r.model_dump(mode="json")
             except Exception as e:  # noqa: BLE001 - VLM failure must not invalidate measurements
-                res = {"status": "unavailable", "model": (st.model or {}).get("label", s.vlm_model), "analysis": None,
+                res = {"status": "unavailable", "model": (st.vision_model or st.model or {}).get("label", s.vlm_model), "analysis": None,
                        "error": f"{type(e).__name__}: {e}"}
             if res.get("status") == "ok":
                 cache.put_json(key, res)
@@ -255,16 +265,54 @@ class Runner:
                + ("More evidence would help." if a.needs_more_evidence else "Evidence is sufficient to conclude."))
         return txt, st.evidence_assessment
 
+    def _open_source_context(self, provisional: dict):
+        """Weak or imagery-starved findings: have the planning model look for non-imagery evidence."""
+        from app.agent import osint
+        from app.location.scope import constrain_verdict
+        st = self.st
+        if st.osint is not None or not self.use_llm:
+            return
+        check = constrain_verdict(provisional, st.location, st.location_resolution) if st.location_resolution else provisional
+        reason = osint.trigger_reason(check, st.analysis)
+        if reason is None:
+            return
+        parent = self._begin("research_open_sources", f"Satellite evidence is weak ({reason}); looking for non-imagery "
+                             "sources about the claim.", "rule")
+        active: list = []
+
+        def notify(action, summary, details):
+            if active:
+                self._end(active.pop(), active_summary.pop())
+            active.append(self._begin(action, "The planning model searches and reads open sources.", "llm", details))
+            active_summary.append(summary)
+        active_summary: list = []
+        loc = st.location or {}
+        period = f"{(st.temporal_scope or {}).get('before_target')} to {(st.temporal_scope or {}).get('after_target')}"
+        from app.indicators import get as _ind
+        st.osint = osint.research(st.claim, loc.get("name") or "", period, reason, notify,
+                                  topic_terms=list(_ind(st.indicator).keywords) if st.indicator else None)
+        if active:
+            self._end(active.pop(), active_summary.pop())
+        o, c = st.osint, st.osint.get("counts", {})
+        summary = ({"findings": f"{len(o['findings'])} verified statement(s) from {len(o['sources'])} source(s): "
+                                f"{c.get('supports_claim', 0)} support, {c.get('contradicts_claim', 0)} contradict, "
+                                f"{c.get('context', 0)} context. Context only; the satellite verdict is unchanged.",
+                    "no_findings": f"{o['summary']} ({len(o['sources'])} source(s) read.)",
+                    "unavailable": f"Open-source research unavailable: {o['summary']}"}[o["status"]])
+        self._end(parent, summary, {"status": o["status"], "queries": o["queries"], "sources": len(o["sources"])},
+                  ok=o["status"] != "unavailable")
+
     def _finalize(self, by: str, reason: str, budget_hit: bool = False):
         from app.verification import evaluator
         st = self.st
-        step = self._begin("finalize", reason, by)
         from app.indicators import get
         ind = get(st.indicator)
         ci = st.claim_interpretation
         a = self._assess()
         st.evidence_assessment = a.model_dump()
         v = evaluator.verdict(ind, ci["asserts"], ci["direction"], st.analysis, a, st.visual_analysis)
+        self._open_source_context(v)
+        step = self._begin("finalize", reason, by)
         sec = report.build_sections(st)
         if st.analysis is None:
             missing = [r for r in ("before", "after") if r not in st.selected_scenes]
@@ -279,6 +327,14 @@ class Runner:
                 sec["limitations"].append("Automatically selected dates are comparison targets inferred from the claim; acquisition timestamps identify the actual observations.")
             from app.location.scope import constrain_verdict
             v = constrain_verdict(v, st.location, st.location_resolution)
+        o = st.osint or {}
+        if o.get("status") == "findings":
+            c = o.get("counts", {})
+            sec["inferred"].append(f"Open-source context (not satellite evidence): {c.get('supports_claim', 0)} statement(s) "
+                                   f"support the claim, {c.get('contradicts_claim', 0)} contradict it, {c.get('context', 0)} "
+                                   f"give context. {o.get('summary', '')}".strip())
+        if o:
+            sec["limitations"].append(o["note"])
         v.update({"observed": sec["observed"], "inferred": sec["inferred"], "not_established": sec["not_established"]})
         st.verdict = v
         st.limitations = sec["limitations"]
@@ -290,6 +346,8 @@ class Runner:
                        "acquired_at": x["scene"]["acquired_at"], "url": x["scene"].get("self_href"),
                        "processing_baseline": x["scene"].get("processing_baseline")}
                       for role, x in st.selected_scenes.items()]
+        if st.osint:
+            st.sources.extend({"type": "open_source", **s} for s in st.osint.get("sources", []))
         if st.location_resolution:
             st.sources.extend({"type": "geographic", **s} for s in st.location_resolution.get("sources", []))
             st.methodology["location_discovery"] = {k: st.location_resolution.get(k) for k in ("verification_status", "explanation", "attempts")}
